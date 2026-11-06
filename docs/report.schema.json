@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/gordonmurray/outofstate.dev/docs/report.schema.json",
+  "title": "Out of State report",
+  "description": "JSON report written by 'oos --format json'. Compatibility rules for schema_version 1: new optional fields and new enum values may be added; consumers must ignore fields they do not know. Removing or renaming a field, or changing its type or meaning, requires a new schema_version.",
+  "type": "object",
+  "required": ["schema_version", "scan", "regions", "sources", "summary", "findings", "warnings", "cost"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "scan": {
+      "type": "object",
+      "required": ["time", "oos_version", "partition", "account_id", "regions", "complete", "state_complete", "discovery_complete"],
+      "properties": {
+        "time": { "type": "string", "format": "date-time" },
+        "oos_version": { "type": "string" },
+        "partition": { "type": "string", "minLength": 1 },
+        "account_id": { "type": "string", "pattern": "^[0-9]{12}$" },
+        "regions": { "type": "array", "items": { "type": "string" } },
+        "complete": { "type": "boolean", "description": "state_complete AND discovery_complete" },
+        "state_complete": { "type": "boolean", "description": "every Terraform source loaded and parsed fully" },
+        "discovery_complete": { "type": "boolean", "description": "every region was scanned successfully" }
+      }
+    },
+    "regions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["region", "status", "instance_count"],
+        "properties": {
+          "region": { "type": "string" },
+          "status": { "enum": ["ok", "failed"] },
+          "error_category": { "type": "string", "description": "access_denied, throttled, timeout, region_disabled, api_error" },
+          "error": { "type": "string", "description": "fixed message for error_category" },
+          "instance_count": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "kind", "workspace", "status", "lineage", "serial", "identity_count", "observed_at"],
+        "properties": {
+          "name": { "type": "string" },
+          "kind": { "enum": ["file", "directory"] },
+          "workspace": { "type": "string", "description": "'unknown' for state files" },
+          "status": { "enum": ["ok", "partial", "failed"] },
+          "error_category": { "type": "string" },
+          "error": { "type": "string", "description": "fixed message for error_category; never Terraform output" },
+          "lineage": { "type": ["string", "null"] },
+          "serial": { "type": ["integer", "null"] },
+          "identity_count": { "type": "integer", "minimum": 0 },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["kind"],
+              "properties": {
+                "address": { "type": "string" },
+                "kind": { "type": "string" }
+              }
+            }
+          },
+          "observed_at": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": ["tracked", "no_match", "unable_to_verify", "not_covered"],
+      "properties": {
+        "tracked": { "type": "integer", "minimum": 0 },
+        "no_match": { "type": "integer", "minimum": 0 },
+        "unable_to_verify": { "type": "integer", "minimum": 0 },
+        "not_covered": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "findings": { "type": "array", "items": { "$ref": "#/$defs/finding" } },
+    "warnings": { "type": "array", "items": { "$ref": "#/$defs/warning" } },
+    "cost": {
+      "oneOf": [
+        { "type": "null", "description": "cost was not requested (--no-cost)" },
+        {
+          "type": "object",
+          "required": ["available"],
+          "properties": {
+            "available": { "type": "boolean" },
+            "reason": { "type": "string" }
+          }
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "finding": {
+      "type": "object",
+      "required": ["resource_type", "status", "partition", "account_id", "region", "arn", "identifier", "resource_id", "import_id", "engine", "engine_version", "class", "instance_status", "tags", "matches", "warnings"],
+      "properties": {
+        "resource_type": { "type": "string", "description": "Terraform resource type, e.g. aws_db_instance" },
+        "status": { "enum": ["tracked", "no_match", "unable_to_verify", "not_covered"] },
+        "not_covered_reason": { "type": "string" },
+        "partition": { "type": "string" },
+        "account_id": { "type": "string" },
+        "region": { "type": "string" },
+        "arn": { "type": "string" },
+        "identifier": { "type": "string" },
+        "resource_id": { "type": "string" },
+        "import_id": { "type": "string", "description": "the ID 'terraform import' expects for resource_type" },
+        "engine": { "type": "string" },
+        "engine_version": { "type": "string" },
+        "class": { "type": "string" },
+        "instance_status": { "type": "string" },
+        "created": { "type": "string", "format": "date-time" },
+        "tags": { "type": "object", "additionalProperties": { "type": "string" } },
+        "matches": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["source", "workspace", "address", "lifecycle", "matched_on", "weak", "renamed"],
+            "properties": {
+              "source": { "type": "string" },
+              "workspace": { "type": "string" },
+              "address": { "type": "string" },
+              "lifecycle": { "enum": ["current", "tainted", "deposed"] },
+              "deposed_key": { "type": "string" },
+              "matched_on": { "enum": ["resource_id", "arn", "identifier"] },
+              "weak": { "type": "boolean", "description": "true unless matched_on is resource_id" },
+              "renamed": { "type": "boolean" }
+            }
+          }
+        },
+        "warnings": { "type": "array", "items": { "$ref": "#/$defs/warning" } }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "tracked" } } },
+          "then": { "properties": { "matches": { "minItems": 1 } } },
+          "else": { "properties": { "matches": { "maxItems": 0 } } }
+        },
+        {
+          "if": { "properties": { "status": { "const": "not_covered" } } },
+          "then": { "required": ["not_covered_reason"] }
+        }
+      ]
+    },
+    "warning": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["multiple_owners", "multiple_addresses", "stale_state_entry", "duplicate_snapshot", "diverged_copies"] },
+        "sources": { "type": "array", "items": { "type": "string" } },
+        "addresses": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

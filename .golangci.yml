@@ -23,6 +23,8 @@ linters:
   settings:
     misspell:
       locale: UK
+      # --no-color and NO_COLOR are CLI conventions.
+      ignore-rules: [color]
     revive:
       rules:
         - name: exported

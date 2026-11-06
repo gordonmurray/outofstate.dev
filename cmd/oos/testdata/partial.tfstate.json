@@ -1,0 +1,52 @@
+{
+  "version": 4,
+  "terraform_version": "1.17.1",
+  "serial": 3,
+  "lineage": "partial-lineage",
+  "outputs": {
+    "pw": {
+      "value": "OOS-SECRET-MARKER",
+      "type": "string",
+      "sensitive": true
+    }
+  },
+  "resources": [
+    {
+      "mode": "managed",
+      "type": "aws_db_instance",
+      "name": "orders",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 2,
+          "attributes": {
+            "arn": "arn:aws:rds:eu-west-1:123456789012:db:orders-db",
+            "id": "db-ORDERS",
+            "identifier": "orders-db",
+            "resource_id": "db-ORDERS",
+            "password": "OOS-SECRET-MARKER-pw"
+          },
+          "private": "OOS-SECRET-MARKER"
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_db_instance",
+      "name": "broken",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 2,
+          "attributes": {
+            "id": "db-ORDERS",
+            "identifier": "orders-db",
+            "resource_id": "db-ORDERS",
+            "password": "OOS-SECRET-MARKER-pw"
+          },
+          "private": "OOS-SECRET-MARKER"
+        }
+      ]
+    }
+  ]
+}
