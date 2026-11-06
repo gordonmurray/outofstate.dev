@@ -37,7 +37,8 @@ type options struct {
 	sourceTimeout time.Duration
 	format        string
 	output        string
-	noCost        bool
+	cost          bool
+	noCost        bool // deprecated: cost is off unless --cost is given
 	noColor       bool
 	inventoryFile string // hidden: fake inventory for tests until live discovery (M3)
 }
@@ -89,7 +90,9 @@ Exit codes:
 	f.DurationVar(&o.sourceTimeout, "source-timeout", 2*time.Minute, "deadline for each Terraform subprocess")
 	f.StringVar(&o.format, "format", "text", "report format: text or json")
 	f.StringVar(&o.output, "output", "", "write the report to this file instead of stdout")
-	f.BoolVar(&o.noCost, "no-cost", false, "skip Cost Explorer (each request costs US$0.01; a run makes a few)")
+	f.BoolVar(&o.cost, "cost", false, "also report RDS spend from Cost Explorer (slower; each request costs US$0.01, a run makes two)")
+	f.BoolVar(&o.noCost, "no-cost", false, "no effect: cost is off unless --cost is given")
+	_ = f.MarkHidden("no-cost")
 	f.BoolVar(&o.noColor, "no-color", false, "disable colour")
 	f.StringVar(&o.inventoryFile, "inventory-file", "", "read the AWS inventory from a JSON file instead of AWS (testing)")
 	_ = f.MarkHidden("inventory-file")
@@ -146,7 +149,7 @@ func scanCommand(o *options, stdout io.Writer, now func() time.Time) (int, error
 	// Cost needs the account ID, so it runs after discovery. It is optional:
 	// any failure is reported in the cost block, never as a scan failure.
 	var costs *cost.Result
-	if !o.noCost && awsAPI != nil {
+	if o.cost && !o.noCost && awsAPI != nil {
 		costs = cost.Fetch(ctx, cost.NewClient(awsAPI.Config()), inv.Partition, inv.AccountID, inv.RegionNames(), now())
 		if ctx.Err() != nil {
 			// Ctrl-C during the cost calls is an interruption, not a cost error.

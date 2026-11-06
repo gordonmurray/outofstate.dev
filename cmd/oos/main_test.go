@@ -187,13 +187,14 @@ func TestReportsMatchSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	scenarios := map[string][]string{
-		"complete":          {"--inventory-file", td("inventory.json"), "--state-file", td("app.tfstate.json"), "--state-file", td("shared.tfstate.json")},
-		"partial source":    {"--inventory-file", td("inventory.json"), "--state-file", td("partial.tfstate.json"), "--state-file", td("broken.tfstate.json"), "--state-file", td("nope.json")},
-		"region failed":     {"--inventory-file", td("inventory_region_failed.json"), "--state-file", td("app.tfstate.json")},
-		"empty inventory":   {"--inventory-file", td("inventory_empty.json"), "--state-file", td("app.tfstate.json")},
-		"only not covered":  {"--inventory-file", td("inventory_not_covered_only.json"), "--state-file", td("app.tfstate.json")},
-		"no cost requested": {"--inventory-file", td("inventory.json"), "--state-file", td("app.tfstate.json"), "--no-cost"},
-		"duplicate state":   {"--inventory-file", td("inventory.json"), "--state-file", td("app.tfstate.json"), "--state-file", td("app-copy.tfstate.json")},
+		"complete":                   {"--inventory-file", td("inventory.json"), "--state-file", td("app.tfstate.json"), "--state-file", td("shared.tfstate.json")},
+		"partial source":             {"--inventory-file", td("inventory.json"), "--state-file", td("partial.tfstate.json"), "--state-file", td("broken.tfstate.json"), "--state-file", td("nope.json")},
+		"region failed":              {"--inventory-file", td("inventory_region_failed.json"), "--state-file", td("app.tfstate.json")},
+		"empty inventory":            {"--inventory-file", td("inventory_empty.json"), "--state-file", td("app.tfstate.json")},
+		"only not covered":           {"--inventory-file", td("inventory_not_covered_only.json"), "--state-file", td("app.tfstate.json")},
+		"old --no-cost flag":         {"--inventory-file", td("inventory.json"), "--state-file", td("app.tfstate.json"), "--no-cost"},
+		"--cost with fake inventory": {"--inventory-file", td("inventory.json"), "--state-file", td("app.tfstate.json"), "--cost"},
+		"duplicate state":            {"--inventory-file", td("inventory.json"), "--state-file", td("app.tfstate.json"), "--state-file", td("app-copy.tfstate.json")},
 	}
 	if err := os.WriteFile(td("app-copy.tfstate.json"), mustRead(t, td("app.tfstate.json")), 0o600); err != nil {
 		t.Fatal(err)
