@@ -126,9 +126,7 @@ func TestExitCodes(t *testing.T) {
 		{"a state file is broken", []string{"--inventory-file", td("inventory.json"), "--state-file", td("app.tfstate.json"), "--state-file", td("broken.tfstate.json")}, scan.ExitPartial},
 		{"a state file is missing", []string{"--inventory-file", td("inventory.json"), "--state-file", td("app.tfstate.json"), "--state-file", td("nope.json")}, scan.ExitPartial},
 		{"bad format", []string{"--inventory-file", td("inventory.json"), "--state-file", td("app.tfstate.json"), "--format", "yaml"}, scan.ExitFatal},
-		{"no state files means . which is not supported yet", []string{"--inventory-file", td("inventory.json")}, scan.ExitFatal},
-		{"--source not supported yet", []string{"--inventory-file", td("inventory.json"), "--source", "."}, scan.ExitFatal},
-		{"no inventory: live discovery not implemented yet", []string{"--state-file", td("app.tfstate.json")}, scan.ExitFatal},
+		{"no state files means . (terraform missing here, so partial)", []string{"--inventory-file", td("inventory.json"), "--tf-binary", "no-such-terraform-xyz"}, scan.ExitPartial},
 		{"unknown flag", []string{"--no-such-flag"}, scan.ExitFatal},
 		{"unwritable output", []string{"--inventory-file", td("inventory.json"), "--state-file", td("app.tfstate.json"), "--output", filepath.Join("testdata", "no-such-dir", "x.txt")}, scan.ExitFatal},
 	}
@@ -336,5 +334,94 @@ func TestSchemaRejectsBadReports(t *testing.T) {
 		if schema.Validate(v) == nil {
 			t.Errorf("%s: schema accepted an invalid report", name)
 		}
+	}
+}
+
+func fakeTerraform(t *testing.T) string {
+	t.Helper()
+	p, err := filepath.Abs(filepath.Join("..", "..", "internal", "tfrun", "testdata", "fake-terraform"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestSourceDirectories(t *testing.T) {
+	state, err := filepath.Abs(td("app.tfstate.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAKE_MODE", "ok")
+	t.Setenv("FAKE_STATE", state)
+	t.Setenv("TF_WORKSPACE", "prod")
+	dir := t.TempDir()
+
+	code, out, stderr := oos(t, "--format", "json", "--inventory-file", td("inventory.json"),
+		"--tf-binary", fakeTerraform(t), "--source", dir)
+	if code != scan.ExitNoMatch {
+		t.Fatalf("exit = %d; stderr: %s", code, stderr)
+	}
+	var rep struct {
+		Sources []struct {
+			Name, Kind, Workspace, Status string
+		} `json:"sources"`
+		Findings []struct {
+			Identifier string `json:"identifier"`
+			Status     string `json:"status"`
+			Matches    []struct {
+				Workspace string `json:"workspace"`
+			} `json:"matches"`
+		} `json:"findings"`
+	}
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatal(err)
+	}
+	src := rep.Sources[0]
+	if src.Name != dir || src.Kind != "directory" || src.Workspace != "prod" || src.Status != "ok" {
+		t.Errorf("source: %+v", src)
+	}
+	for _, f := range rep.Findings {
+		if f.Identifier == "orders-db" && (f.Status != "tracked" || f.Matches[0].Workspace != "prod") {
+			t.Errorf("orders-db: %+v", f)
+		}
+	}
+}
+
+func TestFailedSourceShowsHintNotTerraformOutput(t *testing.T) {
+	t.Setenv("FAKE_MODE", "auth")
+	dir := t.TempDir()
+	code, out, _ := oos(t, "--inventory-file", td("inventory.json"), "--tf-binary", fakeTerraform(t), "--source", dir)
+	if code != scan.ExitPartial {
+		t.Fatalf("exit = %d", code)
+	}
+	if !strings.Contains(out, "could not authenticate to the state backend") ||
+		!strings.Contains(out, "to see Terraform's output, run: TF_WORKSPACE=default") ||
+		!strings.Contains(out, "state pull > /dev/null") {
+		t.Errorf("missing message or hint:\n%s", out)
+	}
+	if strings.Contains(out, "AccessDenied") {
+		t.Error("Terraform's stderr reached the report")
+	}
+}
+
+func TestMissingAWSProfileIsFatal(t *testing.T) {
+	// Isolate from any real AWS configuration on the machine.
+	empty := filepath.Join(t.TempDir(), "empty")
+	if err := os.WriteFile(empty, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AWS_CONFIG_FILE", empty)
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", empty)
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+	for _, k := range []string{"AWS_PROFILE", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_REGION", "AWS_DEFAULT_REGION"} {
+		t.Setenv(k, "")
+	}
+	code, _, stderr := oos(t, "--profile", "oos-test-no-such-profile", "--state-file", td("app.tfstate.json"))
+	if code != scan.ExitFatal || !strings.Contains(stderr, "profile does not exist") {
+		t.Errorf("exit = %d, stderr = %q", code, stderr)
+	}
+	code, _, stderr = oos(t, "--state-file", td("app.tfstate.json"))
+	if code != scan.ExitFatal || !strings.Contains(stderr, "no region is configured") {
+		t.Errorf("no region: exit = %d, stderr = %q", code, stderr)
 	}
 }

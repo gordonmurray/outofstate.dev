@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# jq programs are single-quoted on purpose.
+# shellcheck disable=SC2016
+# Fake terraform for the e2e self-test. Adds and removes instances in $FAKE_DB.
+set -euo pipefail
+: "${TF_VAR_run_id:?}"
+dir="${1#-chdir=}"; shift
+project="$(basename "$dir")"
+echo "terraform $project $*" >> "$FAKE_CALLS"
+# The fakes run concurrently (two applies), so every change to $FAKE_DB is
+# serialised with a mkdir lock.
+update_db() {
+  until mkdir "$FAKE_DB.lock" 2>/dev/null; do sleep 0.05; done
+  jq "$@" "$FAKE_DB" > "$FAKE_DB.$$" && mv "$FAKE_DB.$$" "$FAKE_DB"
+  rmdir "$FAKE_DB.lock"
+}
+add() {
+  update_db --arg id "oos-e2e-${TF_VAR_run_id}-$1" --arg run "$TF_VAR_run_id" \
+    '.DBInstances += [{"DBInstanceIdentifier": $id, "TagList": [{"Key": "oos-e2e", "Value": $run}]}]'
+}
+remove_project() {
+  local p; p="$( [ "$project" = project-a ] && echo a || echo b )"
+  update_db --arg pre "oos-e2e-${TF_VAR_run_id}-$p" '.DBInstances |= map(select(.DBInstanceIdentifier | startswith($pre) | not))'
+}
+case "$1" in
+  init) exit 0 ;;
+  apply)
+    trap 'echo "terraform $project interrupted" >> "$FAKE_CALLS"; exit 143' TERM
+    if [ "$project" = project-a ]; then add a1; else add b1; fi
+    if [ "$project" = project-a ] && [ -n "${FAKE_INJECT:-}" ]; then
+      update_db --argjson extra "$FAKE_INJECT" '.DBInstances += $extra'
+    fi
+    if [ "${FAKE_APPLY_FAIL:-}" = "$project" ]; then exit 1; fi
+    sleep "${FAKE_APPLY_SLEEP:-0}" & wait $!
+    if [ "$project" = project-b ]; then add b2; fi
+    exit 0 ;;
+  destroy)
+    if [ "${FAKE_DESTROY_FAIL:-}" = "1" ]; then exit 1; fi
+    remove_project; exit 0 ;;
+  *) echo "fake terraform: unexpected $*" >&2; exit 99 ;;
+esac

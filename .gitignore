@@ -5,3 +5,4 @@
 .terraform/
 outofstate.txt
 outofstate.json
+/test/e2e/artifacts/

@@ -24,7 +24,8 @@ linters:
     misspell:
       locale: UK
       # --no-color and NO_COLOR are CLI conventions.
-      ignore-rules: [color]
+      # Also US spellings that appear in Terraform and AWS output we match on.
+      ignore-rules: [color, initialized, initialization, unauthorized]
     revive:
       rules:
         - name: exported
