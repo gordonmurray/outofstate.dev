@@ -96,7 +96,7 @@ func TestSchemaRejectsBadCostBlocks(t *testing.T) {
 	doc := buf.String()
 	tampered := map[string]string{
 		"available without periods":  strings.Replace(doc, `"periods"`, `"periodz"`, 1),
-		"unavailable without reason": strings.Replace(strings.Replace(doc, `"available": true`, `"available": false`, 1), `"scope"`, `"scope"`, 1),
+		"unavailable without reason": strings.Replace(doc, `"available": true`, `"available": false`, 1),
 		"numeric amount":             strings.Replace(doc, `"total": "10"`, `"total": 10`, 1),
 		"float-like amount":          strings.Replace(doc, `"total": "10"`, `"total": "1e3"`, 1),
 		"missing bucket":             strings.Replace(doc, `"proxy": "0",`, ``, 1),
