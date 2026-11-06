@@ -1,0 +1,17 @@
+{
+  "name": "oos",
+  "build": {
+    "dockerfile": "../tools/Dockerfile",
+    "context": "../tools",
+    "target": "tools"
+  },
+  "workspaceMount": "source=${localWorkspaceFolder},target=/src,type=bind",
+  "workspaceFolder": "/src",
+  "mounts": ["source=oos-cache,target=/cache,type=volume"],
+  "updateRemoteUserUID": true,
+  "customizations": {
+    "vscode": {
+      "extensions": ["golang.go"]
+    }
+  }
+}

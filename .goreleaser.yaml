@@ -1,0 +1,52 @@
+version: 2
+
+project_name: oos
+
+before:
+  hooks:
+    - go mod tidy -diff
+
+builds:
+  - id: oos
+    main: ./cmd/oos
+    binary: oos
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/gordonmurray/outofstate.dev/internal/version.Version={{.Version}}
+      - -X github.com/gordonmurray/outofstate.dev/internal/version.Commit={{.ShortCommit}}
+      - -X github.com/gordonmurray/outofstate.dev/internal/version.Date={{.Date}}
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: oos
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  use: git
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+
+release:
+  github:
+    owner: gordonmurray
+    name: outofstate.dev
+  prerelease: auto
