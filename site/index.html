@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Out of State: find what's running outside your Terraform</title>
+<meta name="description" content="Out of State (oos) is a local, read-only CLI that compares the AWS resources in an account with the Terraform states you provide, and shows what no state tracks.">
+<meta property="og:title" content="Out of State">
+<meta property="og:description" content="Find what's running outside your Terraform. A local, read-only CLI for AWS and Terraform.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f766e'/%3E%3Ccircle cx='13' cy='16' r='6.5' fill='none' stroke='white' stroke-width='3'/%3E%3Ccircle cx='24' cy='16' r='3' fill='white'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #fbfbf9;
+    --surface: #ffffff;
+    --text: #1c1f23;
+    --muted: #5b636e;
+    --border: #e3e5e8;
+    --accent: #0f766e;
+    --accent-ink: #ffffff;
+    --term-bg: #12161b;
+    --term-text: #d6dde6;
+    --term-dim: #7d8794;
+    --term-green: #5fd38d;
+    --term-grey: #a3adb9;
+    --term-yellow: #e7c463;
+    --code-bg: #f1f3f4;
+    --radius: 10px;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1014;
+      --surface: #151a20;
+      --text: #e7ebef;
+      --muted: #9aa4af;
+      --border: #262d36;
+      --accent: #2dd4bf;
+      --accent-ink: #062b28;
+      --term-bg: #0a0d11;
+      --code-bg: #1b2129;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 17px/1.6 var(--sans);
+  }
+  a { color: var(--accent); }
+  a:focus-visible, button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 20px; }
+  header.top {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 20px 0;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; color: var(--text); text-decoration: none; }
+  .brand svg { width: 28px; height: 28px; }
+  .top nav a { color: var(--muted); text-decoration: none; margin-left: 20px; font-size: 15px; }
+  .top nav a:hover { color: var(--text); }
+
+  .hero { padding: 56px 0 28px; }
+  .hero h1 {
+    font-size: clamp(34px, 6vw, 56px);
+    line-height: 1.08;
+    letter-spacing: -0.02em;
+    margin: 0 0 18px;
+    max-width: 16ch;
+  }
+  .lede { font-size: clamp(18px, 2.2vw, 21px); color: var(--muted); max-width: 46ch; margin: 0 0 10px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 26px; }
+  .btn {
+    display: inline-block; padding: 11px 18px; border-radius: 8px;
+    font-weight: 600; font-size: 16px; text-decoration: none;
+    border: 1px solid var(--border); color: var(--text); background: var(--surface);
+  }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+
+  .terminal {
+    margin: 40px 0 8px;
+    background: var(--term-bg);
+    color: var(--term-text);
+    border-radius: var(--radius);
+    border: 1px solid #222a33;
+    overflow: hidden;
+    box-shadow: 0 12px 40px rgba(0,0,0,.18);
+  }
+  .terminal .bar { display: flex; gap: 7px; padding: 11px 14px; border-bottom: 1px solid #1f262e; }
+  .terminal .bar span { width: 11px; height: 11px; border-radius: 50%; background: #343d47; }
+  .terminal pre {
+    margin: 0; padding: 18px 20px 20px;
+    font: 13.5px/1.55 var(--mono);
+    overflow-x: auto;
+    white-space: pre;
+  }
+  .t-dim { color: var(--term-dim); }
+  .t-cmd { color: #ffffff; }
+  .t-bold { color: #ffffff; font-weight: 700; }
+  .t-grey { color: var(--term-grey); }
+  .t-green { color: var(--term-green); }
+  .t-yellow { color: var(--term-yellow); }
+  .caption { color: var(--muted); font-size: 14px; margin: 0; padding: 12px 20px 14px; background: var(--bg); border-top: 1px solid var(--border); }
+
+  section { padding: 56px 0; border-top: 1px solid var(--border); }
+  section h2 {
+    font-size: clamp(26px, 3.6vw, 34px);
+    line-height: 1.15; letter-spacing: -0.01em;
+    margin: 0 0 16px; max-width: 24ch;
+  }
+  section p { max-width: 62ch; margin: 0 0 14px; }
+  .muted { color: var(--muted); }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 16px; margin-top: 26px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px; }
+  .card h3 { font-size: 17px; margin: 0 0 6px; }
+  .card p { font-size: 15.5px; color: var(--muted); margin: 0; }
+  .tag { display: inline-block; font: 600 12px/1 var(--mono); padding: 4px 7px; border-radius: 5px; background: var(--code-bg); color: var(--muted); margin-bottom: 10px; }
+
+  .code {
+    position: relative;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin: 18px 0;
+  }
+  .code pre { margin: 0; padding: 16px 18px; padding-right: 76px; font: 14px/1.55 var(--mono); overflow-x: auto; }
+  .copy {
+    position: absolute; top: 9px; right: 9px;
+    font: 600 12.5px var(--sans); padding: 6px 10px; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--surface); color: var(--muted); cursor: pointer;
+  }
+  .copy:hover { color: var(--text); }
+  code { font-family: var(--mono); font-size: .92em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+
+  ul.points { padding: 0; list-style: none; margin: 22px 0 0; max-width: 62ch; }
+  ul.points li { padding-left: 26px; position: relative; margin: 0 0 12px; }
+  ul.points li::before { content: ""; position: absolute; left: 4px; top: .62em; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); }
+
+  .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  pre[tabindex]:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; }
+  footer { border-top: 1px solid var(--border); padding: 32px 0 48px; color: var(--muted); font-size: 15px; }
+  footer a { color: var(--muted); }
+
+  @media (max-width: 560px) {
+    .top nav a:not(.gh) { display: none; }
+    .terminal pre { font-size: 12px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="brand" href="./" aria-label="Out of State home">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#0f766e"/><circle cx="13" cy="16" r="6.5" fill="none" stroke="#fff" stroke-width="3"/><circle cx="24" cy="16" r="3" fill="#fff"/></svg>
+      Out of State
+    </a>
+    <nav aria-label="Main">
+      <a href="#how">How it works</a>
+      <a href="#agents">Agents</a>
+      <a href="#install">Install</a>
+      <a class="gh" href="https://github.com/gordonmurray/outofstate.dev">GitHub</a>
+    </nav>
+  </header>
+
+  <main>
+    <div class="hero">
+      <h1>Find what’s running outside your Terraform.</h1>
+      <p class="lede">Out of State is a local, read-only CLI that compares the resources in an AWS account with the Terraform states you provide.</p>
+      <p class="lede">See what is tracked, what has no match, and which Terraform project manages each resource.</p>
+      <div class="actions">
+        <a class="btn primary" href="#install">Get started</a>
+        <a class="btn" href="https://github.com/gordonmurray/outofstate.dev">View on GitHub</a>
+      </div>
+
+      <figure class="terminal">
+        <div class="bar" aria-hidden="true"><span></span><span></span><span></span></div>
+<pre tabindex="0" aria-label="Example oos report"><span class="t-dim">$</span> <span class="t-cmd">oos --profile default --region eu-west-1 --source ./app-infra --source ./shared-infra</span>
+Out of State · account 123456789012 · eu-west-1 · 2026-11-06 10:42 UTC
+Scan: complete
+  source  ./app-infra (default) <span class="t-green">✓</span> 10:42:00
+  source  ./shared-infra (prod) <span class="t-green">✓</span> 10:42:01
+
+<span class="t-bold">2 import candidate(s): resources with no match in the supplied states</span>
+
+  <span class="t-grey">analytics-db            </span> eu-west-1       rds   db.r6g.large     postgres 16.2            available    created 2025-03-02
+  <span class="t-grey">legacy-alb              </span> eu-west-1       alb   internal         vpc-0a1b2c3d             active       created 2024-01-01
+
+<span class="t-green">3 tracked in state</span>
+  <span class="t-green">orders-db               </span> eu-west-1       rds   ./app-infra (default) aws_db_instance.orders (resource_id)
+  <span class="t-green">reports-db              </span> eu-west-1       rds   ./shared-infra (prod) aws_db_instance.reports (resource_id)
+  <span class="t-green">web-alb                 </span> eu-west-1       alb   ./app-infra (default) aws_lb.web (arn)
+
+<span class="t-dim">1 not covered</span>
+  <span class="t-dim">billing-cluster-1        eu-west-1       rds   member of an Aurora or Multi-AZ DB cluster</span>
+
+Import candidates need a configuration review and a terraform plan before applying.
+Use --format json for full details (ARNs, resource and import IDs, tags).</pre>
+        <figcaption class="caption">Example output. Two resources need a look, three are tracked with the state and address that manage them, and one is outside what <code>oos</code> checks so far.</figcaption>
+      </figure>
+    </div>
+
+    <section id="how">
+      <h2>One account. Several Terraform projects. One clear report.</h2>
+      <p>Point <code>oos</code> at your AWS profile and your Terraform working directories. It checks the supported resources against every state you supply and brings the gaps to the top.</p>
+      <p>Tracked resources link back to their Terraform address. Incomplete checks are clearly marked, so a state that could not be read never shows up as “unmanaged”.</p>
+      <div class="grid">
+        <div class="card">
+          <h3>Read-only</h3>
+          <p>Lists resources through the AWS API and reads state with <code>terraform state pull</code>. It never runs <code>plan</code> or <code>apply</code>, and never changes AWS resources or Terraform state.</p>
+        </div>
+        <div class="card">
+          <h3>Careful with state</h3>
+          <p>Terraform state holds secrets. <code>oos</code> keeps only the identifiers it needs and never prints raw state or Terraform’s own error output.</p>
+        </div>
+        <div class="card">
+          <h3>Matches on real identity</h3>
+          <p>Where AWS gives a resource a lasting identity, such as an RDS resource ID or a load balancer ARN, a resource recreated under the same name is not mistaken for the one in your state. Weaker matches are marked.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="agents">
+      <h2>Give your coding agent a head start.</h2>
+      <p><code>oos</code> handles AWS discovery and Terraform state matching before your agent gets involved. Export the report as JSON, then ask your agent to investigate the findings and help prepare Terraform changes.</p>
+      <div class="code">
+        <button class="copy" type="button" data-copy="scan" aria-label="Copy the scan command">Copy</button>
+<pre tabindex="0"><code id="scan">oos --profile default \
+  --source ./app-infra \
+  --source ./shared-infra \
+  --format json \
+  --output outofstate.json</code></pre>
+      </div>
+      <p>Your agent starts with resource identities, import IDs, matching evidence and coverage details. You choose what to investigate and how to resolve it.</p>
+      <p>The repository includes an agent skill that teaches Claude Code, and other agents that read the Agent Skills format, to run <code>oos</code>, write <code>import</code> blocks and stop at a plan for you to review. It never applies changes. In Claude Code:</p>
+      <div class="code">
+        <button class="copy" type="button" data-copy="skill" aria-label="Copy the plugin install commands">Copy</button>
+<pre tabindex="0"><code id="skill">/plugin marketplace add gordonmurray/outofstate.dev
+/plugin install oos@outofstate</code></pre>
+      </div>
+    </section>
+
+    <section id="supported">
+      <h2>Start with the infrastructure you already have.</h2>
+      <p>Works with Terraform and OpenTofu (<code>--tf-binary tofu</code>), and runs on your machine with your existing AWS and state-backend access. Each source must be a working directory where <code>init</code> has already been run.</p>
+      <div class="grid">
+        <div class="card">
+          <span class="tag">rds</span>
+          <h3>RDS DB instances</h3>
+          <p>Matched on the immutable resource ID against <code>aws_db_instance</code>. Older state without one falls back to ARN or name, marked as a weaker match.</p>
+        </div>
+        <div class="card">
+          <span class="tag">lb</span>
+          <h3>Application and Network Load Balancers</h3>
+          <p>Matched on the load balancer ARN against <code>aws_lb</code> and <code>aws_alb</code>.</p>
+        </div>
+        <div class="card">
+          <span class="tag">s3</span>
+          <h3>S3 general purpose buckets</h3>
+          <p>Matched on bucket name against <code>aws_s3_bucket</code>, and on region when the state records it. Buckets have no lasting ID, so one recreated with the same name in the same region looks the same.</p>
+        </div>
+      </div>
+      <p class="muted" style="margin-top:22px">More resource types are on the way. When a resource’s tags show that CloudFormation, Elastic Beanstalk or Kubernetes manages it (or an S3 bucket’s name follows such a tool’s convention), the report adds a warning so you check there before importing.</p>
+    </section>
+
+    <section id="install">
+      <h2>Install in one line.</h2>
+      <p>For Linux and macOS, on Intel and ARM (including Apple Silicon). The installer checks the download against its SHA-256 checksum before installing <code>oos</code> into <code>~/.local/bin</code>.</p>
+      <div class="code">
+        <button class="copy" type="button" data-copy="install-cmd" aria-label="Copy the install command">Copy</button>
+<pre tabindex="0"><code id="install-cmd">curl -fsSL https://raw.githubusercontent.com/gordonmurray/outofstate.dev/main/scripts/install.sh | bash</code></pre>
+      </div>
+      <p>Then run it from a Terraform working directory:</p>
+      <div class="code">
+        <button class="copy" type="button" data-copy="run" aria-label="Copy the run command">Copy</button>
+<pre tabindex="0"><code id="run">oos --profile default</code></pre>
+      </div>
+      <p class="muted">Releases come with signed build provenance you can verify with the GitHub CLI. See the <a href="https://github.com/gordonmurray/outofstate.dev#quick-start">README</a> for options, the IAM permissions it needs, and how to read the report.</p>
+      <div class="actions">
+        <a class="btn primary" href="https://github.com/gordonmurray/outofstate.dev">Explore Out of State on GitHub</a>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p>Out of State is open source. <a href="https://github.com/gordonmurray/outofstate.dev">Source, issues and releases on GitHub</a>.</p>
+  </footer>
+</div>
+<p id="copy-status" class="visually-hidden" aria-live="polite"></p>
+<script>
+  // Copy buttons. The page works without JavaScript; this only adds copying.
+  for (const btn of document.querySelectorAll("button.copy")) {
+    btn.addEventListener("click", async () => {
+      const text = document.getElementById(btn.dataset.copy).textContent;
+      try {
+        await navigator.clipboard.writeText(text);
+        btn.textContent = "Copied";
+        document.getElementById("copy-status").textContent = "Copied to the clipboard";
+      } catch {
+        btn.textContent = "Select and copy";
+      }
+      setTimeout(() => { btn.textContent = "Copy"; }, 1800);
+    });
+  }
+</script>
+</body>
+</html>
