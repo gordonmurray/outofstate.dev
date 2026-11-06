@@ -1,0 +1,13 @@
+{
+  "name": "outofstate",
+  "owner": {
+    "name": "Gordon Murray"
+  },
+  "plugins": [
+    {
+      "name": "oos",
+      "source": "./",
+      "description": "Find AWS resources that no Terraform state tracks with the oos CLI, and bring chosen ones under Terraform with import blocks."
+    }
+  ]
+}
