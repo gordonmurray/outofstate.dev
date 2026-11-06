@@ -2,18 +2,24 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/gordonmurray/outofstate.dev/internal/discover"
 	"github.com/gordonmurray/outofstate.dev/internal/report"
 	"github.com/gordonmurray/outofstate.dev/internal/scan"
+	"github.com/gordonmurray/outofstate.dev/internal/tfrun"
 	"github.com/gordonmurray/outofstate.dev/internal/version"
 )
 
@@ -89,6 +95,9 @@ Exit codes:
 	return cmd
 }
 
+// sourceConcurrency bounds how many Terraform subprocesses run at once.
+const sourceConcurrency = 4
+
 func scanCommand(o *options, stdout io.Writer, now func() time.Time) (int, error) {
 	if o.format != "text" && o.format != "json" {
 		return scan.ExitFatal, fmt.Errorf("--format must be text or json, not %q", o.format)
@@ -99,21 +108,37 @@ func scanCommand(o *options, stdout io.Writer, now func() time.Time) (int, error
 	if len(stateFiles) == 0 && len(sourceDirs) == 0 {
 		sourceDirs = []string{"."}
 	}
-	if len(sourceDirs) > 0 {
-		return scan.ExitFatal, errors.New("reading Terraform working directories (--source) is not implemented yet; use --state-file")
-	}
 
-	if o.inventoryFile == "" {
-		return scan.ExitFatal, errors.New("live AWS discovery is not implemented yet")
-	}
-	inv, err := discover.LoadFile(o.inventoryFile)
-	if err != nil {
-		return scan.ExitFatal, err
-	}
+	// Ctrl-C cancels AWS calls and kills Terraform subprocesses.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-	var sources []scan.LoadedSource
-	for _, p := range stateFiles {
-		sources = append(sources, scan.LoadStateFile(p, now))
+	// Discovery and state loading run at the same time.
+	var (
+		inv     *discover.Inventory
+		discErr error
+		sources []scan.LoadedSource
+		wg      sync.WaitGroup
+	)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		inv, discErr = discoverInventory(ctx, o)
+	}()
+	go func() {
+		defer wg.Done()
+		opts := tfrun.Options{Binary: o.tfBinary, Timeout: o.sourceTimeout}
+		sources = scan.LoadDirectories(ctx, sourceDirs, opts, sourceConcurrency, now)
+		for _, p := range stateFiles {
+			sources = append(sources, scan.LoadStateFile(p, now))
+		}
+	}()
+	wg.Wait()
+	if discErr != nil {
+		return scan.ExitFatal, discErr
+	}
+	if ctx.Err() != nil {
+		return scan.ExitFatal, errors.New("interrupted")
 	}
 
 	rep := scan.Run(scan.Input{Inventory: inv, Sources: sources, Version: version.Version, Time: now()})
@@ -127,12 +152,30 @@ func scanCommand(o *options, stdout io.Writer, now func() time.Time) (int, error
 	return scan.ExitCode(rep), nil
 }
 
+func discoverInventory(ctx context.Context, o *options) (*discover.Inventory, error) {
+	if o.inventoryFile != "" {
+		return discover.LoadFile(o.inventoryFile)
+	}
+	a, err := discover.NewAWS(ctx, o.profile)
+	if err != nil {
+		return nil, err
+	}
+	regions := dedupe(o.regions)
+	if len(regions) == 0 && a.DefaultRegion() != "" {
+		regions = []string{a.DefaultRegion()}
+	}
+	return a.Discover(ctx, regions)
+}
+
 func write(o *options, stdout io.Writer, rep *report.Report) error {
 	render := report.WriteText
 	if o.format == "json" {
 		render = report.WriteJSON
 	}
 	if o.output == "" {
+		if o.format == "text" && useColour(o, stdout) {
+			return report.WriteTextWith(stdout, rep, report.TextOptions{Color: true})
+		}
 		return render(stdout, rep)
 	}
 	f, err := os.Create(o.output)
@@ -147,6 +190,30 @@ func write(o *options, stdout io.Writer, rep *report.Report) error {
 		return fmt.Errorf("writing report: %w", err)
 	}
 	return nil
+}
+
+// useColour is true only for text written to a terminal, unless NO_COLOR is
+// set (https://no-color.org) or --no-color is given.
+func useColour(o *options, w io.Writer) bool {
+	if o.noColor || os.Getenv("NO_COLOR") != "" {
+		return false
+	}
+	f, ok := w.(*os.File)
+	return ok && term.IsTerminal(int(f.Fd()))
+}
+
+// dedupe removes repeated values, keeping the first occurrence.
+func dedupe(values []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, v := range values {
+		if v == "" || seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	return out
 }
 
 // dedupePaths removes repeats, comparing absolute paths, and keeps the

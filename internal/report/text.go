@@ -9,29 +9,42 @@ import (
 	"unicode"
 )
 
-// WriteText writes the human-readable report. The same content is written
-// to a terminal or a file; only colour (added in M3) differs.
-func WriteText(w io.Writer, r *Report) error {
-	p := &printer{w: w}
+// TextOptions controls text rendering.
+type TextOptions struct {
+	// Color adds ANSI colours. Use it only for a terminal; the words are the
+	// same either way.
+	Color bool
+}
+
+// WriteText writes the human-readable report without colour.
+func WriteText(w io.Writer, r *Report) error { return WriteTextWith(w, r, TextOptions{}) }
+
+// WriteTextWith writes the human-readable report. The content is the same
+// for a terminal or a file; only colour differs.
+func WriteTextWith(w io.Writer, r *Report, o TextOptions) error {
+	p := &printer{w: w, color: o.Color}
 
 	scope := strings.Join(r.Scan.Regions, ", ")
 	p.f("Out of State · account %s · %s · %s\n", clean(r.Scan.AccountID), clean(scope), r.Scan.Time.UTC().Format("2006-01-02 15:04 MST"))
 	if r.Scan.Complete {
 		p.f("Scan: complete\n")
 	} else {
-		p.f("Scan: PARTIAL. Results below may be incomplete.\n")
+		p.f("%s\n", p.c(yellow, "Scan: PARTIAL. Results below may be incomplete."))
 	}
 	for _, s := range r.Sources {
-		mark := "✓"
+		mark := p.c(green, "✓")
 		switch s.Status {
 		case "partial":
-			mark = "partial"
+			mark = p.c(yellow, "partial")
 		case "failed":
-			mark = "FAILED"
+			mark = p.c(red, "FAILED")
 		}
 		p.f("  source  %s (%s) %s %s\n", clean(s.Name), clean(s.Workspace), mark, s.ObservedAt.UTC().Format("15:04:05"))
 		if s.Error != "" {
-			p.f("          %s\n", s.Error)
+			p.f("          %s\n", clean(s.Error))
+		}
+		if s.Hint != "" {
+			p.f("          to see Terraform's output, run: %s\n", clean(s.Hint))
 		}
 		if s.Status == "partial" {
 			p.f("          %d aws_db_instance object(s) in this state could not be read\n", len(s.Problems))
@@ -39,7 +52,7 @@ func WriteText(w io.Writer, r *Report) error {
 	}
 	for _, reg := range r.Regions {
 		if reg.Status == "failed" {
-			p.f("  region  %s FAILED: %s\n", clean(reg.Region), clean(reg.Error))
+			p.f("  region  %s %s: %s\n", clean(reg.Region), p.c(red, "FAILED"), clean(reg.Error))
 		}
 	}
 	p.f("\n")
@@ -55,26 +68,26 @@ func WriteText(w io.Writer, r *Report) error {
 	notCovered := filter(r.Findings, "not_covered")
 
 	if len(candidates) > 0 {
-		p.f("%d import candidate(s): RDS instances with no match in the supplied states\n\n", len(candidates))
+		p.f("%s\n\n", p.c(bold, fmt.Sprintf("%d import candidate(s): RDS instances with no match in the supplied states", len(candidates))))
 		for _, f := range candidates {
-			p.f("  %-24s %-16s %-16s %-12s %s\n", clean(f.Identifier), clean(f.Class), clean(f.Engine+" "+f.EngineVersion), clean(f.InstanceStatus), created(f))
+			p.f("  %s %-16s %-16s %-12s %s\n", p.c(grey, padName(clean(f.Identifier))), clean(f.Class), clean(f.Engine+" "+f.EngineVersion), clean(f.InstanceStatus), created(f))
 		}
 		p.f("\n")
 	}
 	if len(unverified) > 0 {
-		p.f("%d unable to verify: no match, but a source could not be read fully\n\n", len(unverified))
+		p.f("%s\n\n", p.c(yellow, fmt.Sprintf("%d unable to verify: no match, but a source could not be read fully", len(unverified))))
 		for _, f := range unverified {
-			p.f("  %-24s %-16s %-16s %-12s %s\n", clean(f.Identifier), clean(f.Class), clean(f.Engine+" "+f.EngineVersion), clean(f.InstanceStatus), created(f))
+			p.f("  %s %-16s %-16s %-12s %s\n", p.c(yellow, padName(clean(f.Identifier))), clean(f.Class), clean(f.Engine+" "+f.EngineVersion), clean(f.InstanceStatus), created(f))
 		}
 		p.f("\n")
 	}
 	if len(tracked) > 0 {
-		p.f("%d tracked in state\n", len(tracked))
+		p.f("%s\n", p.c(green, fmt.Sprintf("%d tracked in state", len(tracked))))
 		for _, f := range tracked {
 			for i, m := range f.Matches {
-				name := clean(f.Identifier)
+				name := padName(clean(f.Identifier))
 				if i > 0 {
-					name = ""
+					name = padName("")
 				}
 				extra := " (" + m.MatchedOn
 				if m.Weak {
@@ -87,15 +100,15 @@ func WriteText(w io.Writer, r *Report) error {
 					extra += ", " + m.Lifecycle
 				}
 				extra += ")"
-				p.f("  %-24s %s (%s) %s%s\n", name, clean(m.Source), clean(m.Workspace), clean(m.Address), extra)
+				p.f("  %s %s (%s) %s%s\n", p.c(green, name), clean(m.Source), clean(m.Workspace), clean(m.Address), extra)
 			}
 		}
 		p.f("\n")
 	}
 	if len(notCovered) > 0 {
-		p.f("%d not covered\n", len(notCovered))
+		p.f("%s\n", p.c(dim, fmt.Sprintf("%d not covered", len(notCovered))))
 		for _, f := range notCovered {
-			p.f("  %-24s %s\n", clean(f.Identifier), f.NotCoveredReason)
+			p.f("  %s %s\n", p.c(dim, padName(clean(f.Identifier))), p.c(dim, f.NotCoveredReason))
 		}
 		p.f("\n")
 	}
@@ -112,7 +125,7 @@ func WriteText(w io.Writer, r *Report) error {
 		}
 	}
 	if len(warnings)+len(findingWarnings) > 0 {
-		p.f("Warnings\n")
+		p.f("%s\n", p.c(yellow, "Warnings"))
 		for _, w := range warnings {
 			p.f("  %s\n", describe(w))
 		}
@@ -151,8 +164,40 @@ func WriteText(w io.Writer, r *Report) error {
 }
 
 type printer struct {
-	w   io.Writer
-	err error
+	w     io.Writer
+	err   error
+	color bool
+}
+
+// ANSI styles. Applied only to text oos wrote or already escaped with clean.
+const (
+	bold   = "1"
+	dim    = "2"
+	red    = "31"
+	green  = "32"
+	yellow = "33"
+	grey   = "90"
+)
+
+func (p *printer) c(style, s string) string {
+	if !p.color || s == "" {
+		return s
+	}
+	return "\x1b[" + style + "m" + s + "\x1b[0m"
+}
+
+// nameWidth is the width of the first column.
+const nameWidth = 24
+
+// padName right-pads s to nameWidth runes (fmt's %-24s would count escape
+// codes added by colour).
+func padName(s string) string {
+	width := nameWidth
+	n := len([]rune(s))
+	if n >= width {
+		return s
+	}
+	return s + strings.Repeat(" ", width-n)
 }
 
 func (p *printer) f(format string, a ...any) {
@@ -192,6 +237,8 @@ func describe(w Warning) string {
 			strings.Join(addrs, ", ") + " in " + strings.Join(srcs, ", ")
 	case "duplicate_snapshot":
 		return "the same state snapshot was supplied more than once: " + strings.Join(srcs, ", ") + " (counted once)"
+	case "tags_unavailable":
+		return "tags could not be read (rds:ListTagsForResource)"
 	case "diverged_copies":
 		return "different versions of the same state were supplied: " + strings.Join(srcs, ", ")
 	default:

@@ -19,7 +19,10 @@ type Instance struct {
 	Status        string // DBInstanceStatus: available, stopped, modifying, ...
 	ClusterID     string // DBClusterIdentifier, non-empty for cluster members
 	Tags          map[string]string
-	Created       time.Time
+	// TagsUnavailable is set when tags could not be read. It is a warning
+	// only: the instance is still matched normally.
+	TagsUnavailable bool
+	Created         time.Time
 
 	// NotCovered is non-empty when the instance is outside MVP scope, and
 	// says why. Set by Classify.

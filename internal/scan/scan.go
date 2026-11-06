@@ -3,14 +3,17 @@
 package scan
 
 import (
+	"context"
 	"errors"
 	"os"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/gordonmurray/outofstate.dev/internal/discover"
 	"github.com/gordonmurray/outofstate.dev/internal/match"
 	"github.com/gordonmurray/outofstate.dev/internal/report"
+	"github.com/gordonmurray/outofstate.dev/internal/tfrun"
 	"github.com/gordonmurray/outofstate.dev/internal/tfstate"
 )
 
@@ -39,7 +42,65 @@ type LoadedSource struct {
 	match.Source
 	Kind          string // "file" or "directory"
 	ErrorCategory string
+	ErrorMessage  string // fixed text; empty means the default for the category
+	Hint          string // command to run by hand to see Terraform's own output
 	ObservedAt    time.Time
+}
+
+// LoadDirectory runs "state pull" in a Terraform working directory and
+// parses the result. Failures never stop the scan: they produce a failed
+// source with a fixed message and a hint.
+func LoadDirectory(ctx context.Context, dir string, opts tfrun.Options, now func() time.Time) LoadedSource {
+	ws, data, err := tfrun.Pull(ctx, dir, opts)
+	ls := LoadedSource{
+		Source:     match.Source{Name: dir, Workspace: ws},
+		Kind:       "directory",
+		ObservedAt: now(),
+	}
+	if ls.Workspace == "" {
+		ls.Workspace = "unknown"
+	}
+	if err != nil {
+		ls.Status, ls.ErrorCategory = match.SourceFailed, string(err.Category)
+		ls.ErrorMessage, ls.Hint = err.Message(), err.Hint()
+		return ls
+	}
+	st, perr := tfstate.Parse(data)
+	if perr != nil {
+		ls.Status, ls.ErrorCategory = match.SourceFailed, string(tfstate.CategoryInvalidJSON)
+		var te *tfstate.Error
+		if errors.As(perr, &te) {
+			ls.ErrorCategory = string(te.Category)
+		}
+		hint := &tfrun.Error{Category: tfrun.CategoryExitError, Binary: opts.Binary, Dir: dir, Workspace: ws}
+		ls.Hint = hint.Hint()
+		return ls
+	}
+	ls.State = st
+	ls.Status = match.SourceOK
+	if st.Partial() {
+		ls.Status = match.SourcePartial
+	}
+	return ls
+}
+
+// LoadDirectories loads several directories, at most limit at a time,
+// keeping the input order.
+func LoadDirectories(ctx context.Context, dirs []string, opts tfrun.Options, limit int, now func() time.Time) []LoadedSource {
+	out := make([]LoadedSource, len(dirs))
+	slots := make(chan struct{}, max(1, limit))
+	var wg sync.WaitGroup
+	for i, d := range dirs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			slots <- struct{}{}
+			defer func() { <-slots }()
+			out[i] = LoadDirectory(ctx, d, opts, now)
+		}()
+	}
+	wg.Wait()
+	return out
 }
 
 // LoadStateFile reads and parses one --state-file. Failures never stop the
@@ -152,8 +213,11 @@ func ExitCode(r *report.Report) int {
 func source(s LoadedSource) report.Source {
 	rs := report.Source{
 		Name: s.Name, Kind: s.Kind, Workspace: s.Workspace, Status: string(s.Status),
-		ErrorCategory: s.ErrorCategory, Error: sourceMessages[s.ErrorCategory],
+		ErrorCategory: s.ErrorCategory, Error: s.ErrorMessage, Hint: s.Hint,
 		ObservedAt: s.ObservedAt.UTC(),
+	}
+	if rs.Error == "" {
+		rs.Error = sourceMessages[s.ErrorCategory]
 	}
 	if s.State != nil {
 		lineage, serial := s.State.Lineage, s.State.Serial
@@ -177,6 +241,9 @@ func finding(f match.Finding) report.Finding {
 	}
 	if rf.Tags == nil {
 		rf.Tags = map[string]string{}
+	}
+	if in.TagsUnavailable {
+		rf.Warnings = append(rf.Warnings, report.Warning{Kind: "tags_unavailable"})
 	}
 	if !in.Created.IsZero() {
 		c := in.Created.UTC()
