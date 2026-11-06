@@ -1,0 +1,160 @@
+{
+  "schema_version": 1,
+  "scan": {
+    "time": "2026-11-06T10:42:00Z",
+    "oos_version": "dev",
+    "partition": "aws",
+    "account_id": "123456789012",
+    "regions": [
+      "eu-west-1"
+    ],
+    "complete": true,
+    "state_complete": true,
+    "discovery_complete": true
+  },
+  "regions": [
+    {
+      "region": "eu-west-1",
+      "status": "ok",
+      "instance_count": 4
+    }
+  ],
+  "sources": [
+    {
+      "name": "testdata/app.tfstate.json",
+      "kind": "file",
+      "workspace": "unknown",
+      "status": "ok",
+      "lineage": "app-lineage",
+      "serial": 3,
+      "identity_count": 1,
+      "observed_at": "2026-11-06T10:42:00Z"
+    },
+    {
+      "name": "testdata/shared.tfstate.json",
+      "kind": "file",
+      "workspace": "unknown",
+      "status": "ok",
+      "lineage": "shared-lineage",
+      "serial": 3,
+      "identity_count": 1,
+      "observed_at": "2026-11-06T10:42:00Z"
+    }
+  ],
+  "summary": {
+    "tracked": 2,
+    "no_match": 1,
+    "unable_to_verify": 0,
+    "not_covered": 1
+  },
+  "findings": [
+    {
+      "resource_type": "aws_db_instance",
+      "status": "no_match",
+      "partition": "aws",
+      "account_id": "123456789012",
+      "region": "eu-west-1",
+      "arn": "arn:aws:rds:eu-west-1:123456789012:db:analytics-db",
+      "identifier": "analytics-db",
+      "resource_id": "db-ANALYTICS",
+      "import_id": "analytics-db",
+      "engine": "postgres",
+      "engine_version": "16.2",
+      "class": "db.r6g.large",
+      "instance_status": "available",
+      "created": "2025-03-02T10:00:00Z",
+      "tags": {
+        "team": "data"
+      },
+      "matches": [],
+      "warnings": []
+    },
+    {
+      "resource_type": "aws_db_instance",
+      "status": "tracked",
+      "partition": "aws",
+      "account_id": "123456789012",
+      "region": "eu-west-1",
+      "arn": "arn:aws:rds:eu-west-1:123456789012:db:legacy-reports",
+      "identifier": "legacy-reports",
+      "resource_id": "db-LEGACY",
+      "import_id": "legacy-reports",
+      "engine": "mysql",
+      "engine_version": "8.0.39",
+      "class": "db.t4g.micro",
+      "instance_status": "stopped",
+      "created": "2025-03-02T10:00:00Z",
+      "tags": {},
+      "matches": [
+        {
+          "source": "testdata/shared.tfstate.json",
+          "workspace": "unknown",
+          "address": "aws_db_instance.legacy",
+          "lifecycle": "current",
+          "matched_on": "resource_id",
+          "weak": false,
+          "renamed": false
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "resource_type": "aws_db_instance",
+      "status": "tracked",
+      "partition": "aws",
+      "account_id": "123456789012",
+      "region": "eu-west-1",
+      "arn": "arn:aws:rds:eu-west-1:123456789012:db:orders-db",
+      "identifier": "orders-db",
+      "resource_id": "db-ORDERS",
+      "import_id": "orders-db",
+      "engine": "postgres",
+      "engine_version": "16.4",
+      "class": "db.t4g.micro",
+      "instance_status": "available",
+      "created": "2025-03-02T10:00:00Z",
+      "tags": {
+        "team": "data"
+      },
+      "matches": [
+        {
+          "source": "testdata/app.tfstate.json",
+          "workspace": "unknown",
+          "address": "aws_db_instance.orders",
+          "lifecycle": "current",
+          "matched_on": "resource_id",
+          "weak": false,
+          "renamed": false
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "resource_type": "aws_db_instance",
+      "status": "not_covered",
+      "not_covered_reason": "member of an Aurora or Multi-AZ DB cluster",
+      "partition": "aws",
+      "account_id": "123456789012",
+      "region": "eu-west-1",
+      "arn": "arn:aws:rds:eu-west-1:123456789012:db:billing-cluster-1",
+      "identifier": "billing-cluster-1",
+      "resource_id": "db-AURORA",
+      "import_id": "billing-cluster-1",
+      "engine": "aurora-postgresql",
+      "engine_version": "16.4",
+      "class": "db.t4g.micro",
+      "instance_status": "available",
+      "created": "2025-03-02T10:00:00Z",
+      "tags": {
+        "team": "data"
+      },
+      "matches": [],
+      "warnings": []
+    }
+  ],
+  "warnings": [],
+  "cost": {
+    "available": false,
+    "reason": "not implemented yet"
+  }
+}
