@@ -420,3 +420,81 @@ func TestNullInstanceEntryIsAProblem(t *testing.T) {
 		t.Errorf("problems=%+v", st.Problems)
 	}
 }
+
+func TestLoadBalancers(t *testing.T) {
+	st := parse(t, "lb.json")
+	got := byAddress(st)
+	want := map[string]string{
+		`module.edge.aws_lb.web[0]`: "web-0",
+		`module.edge.aws_lb.web[1]`: "web-1",
+		`aws_alb.legacy["eu"]`:      "legacy-alb",
+		`aws_lb.internal_nlb`:       "int-nlb",
+		`aws_lb.arn_only_in_id`:     "idonly",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %v", keys(got))
+	}
+	for addr, name := range want {
+		id, ok := got[addr]
+		if !ok {
+			t.Errorf("missing %s", addr)
+			continue
+		}
+		if id.Type != "aws_lb" || id.Identifier != name || id.ResourceID != "" ||
+			id.Partition != "aws" || id.Region != "eu-west-1" || id.AccountID != "123456789012" {
+			t.Errorf("%s: %+v", addr, id)
+		}
+		if _, ok := ParseLBARN(id.ARN); !ok {
+			t.Errorf("%s: ARN %q not a load balancer ARN", addr, id.ARN)
+		}
+	}
+	// aws_lb.bad holds a target group ARN: unusable, so the source is partial.
+	if len(st.Problems) != 1 || st.Problems[0].Address != "aws_lb.bad" || st.Problems[0].Kind != ProblemInvalidARN {
+		t.Errorf("problems: %+v", st.Problems)
+	}
+}
+
+func TestParseLBARN(t *testing.T) {
+	tests := []struct {
+		in   string
+		ok   bool
+		kind string
+	}{
+		{"arn:aws:elasticloadbalancing:eu-west-1:123456789012:loadbalancer/app/my-alb/50dc6c495c0c9188", true, "app"},
+		{"arn:aws:elasticloadbalancing:eu-west-1:123456789012:loadbalancer/net/my-nlb/50dc6c495c0c9188", true, "net"},
+		{"arn:aws:elasticloadbalancing:eu-west-1:123456789012:loadbalancer/gwy/my-gwlb/50dc6c495c0c9188", true, "gwy"},
+		{"arn:aws-us-gov:elasticloadbalancing:us-gov-west-1:123456789012:loadbalancer/app/a/50dc6c495c0c9188", true, "app"},
+		{"arn:aws:elasticloadbalancing:eu-west-1:123456789012:targetgroup/tg/50dc6c495c0c9188", false, ""},
+		{"arn:aws:elasticloadbalancing:eu-west-1:123456789012:listener/app/my-alb/50dc6c495c0c9188/f2f7dc8efc522ab2", false, ""},
+		{"arn:aws:elasticloadbalancing:eu-west-1:123456789012:loadbalancer/my-classic-elb", false, ""},
+		{"arn:aws:elasticloadbalancing:eu-west-1:123456789012:loadbalancer/xyz/my-alb/50dc6c495c0c9188", false, ""},
+		{"arn:aws:elasticloadbalancing:eu-west-1:123456789012:loadbalancer/app/my-alb/NOTHEX", false, ""},
+		{"arn:aws:elasticloadbalancing:eu-west-1:123456789012:loadbalancer/app/-bad-/50dc6c495c0c9188", false, ""},
+		{"arn:aws:elasticloadbalancing:eu-west-1:123456789012:loadbalancer/app/web--prod/50dc6c495c0c9188", true, "app"},
+		{"arn:aws:elasticloadbalancing:eu-west-1:123456789012:loadbalancer/app/web-/50dc6c495c0c9188", false, ""},
+		{"arn:aws:elasticloadbalancing:eu-west-1:123456789012:loadbalancer/app/a/50dc6c495c0c9188", true, "app"},
+		{"arn:aws:elasticloadbalancing:eu-west-1:12345:loadbalancer/app/my-alb/50dc6c495c0c9188", false, ""},
+		{"arn:aws:rds:eu-west-1:123456789012:db:orders", false, ""},
+		{"", false, ""},
+	}
+	for _, tt := range tests {
+		a, ok := ParseLBARN(tt.in)
+		if ok != tt.ok || a.Kind != tt.kind {
+			t.Errorf("ParseLBARN(%q) = %+v, %v", tt.in, a, ok)
+		}
+	}
+}
+
+func TestKeepTypes(t *testing.T) {
+	st, err := Parse([]byte(`{"version":4,"lineage":"l","serial":1,"resources":[
+		{"mode":"managed","type":"aws_db_instance","name":"db","instances":[{"schema_version":2,"attributes":{` + goodARN + `,"resource_id":"db-1"}}]},
+		{"mode":"managed","type":"aws_lb","name":"bad","instances":[{"schema_version":0,"attributes":{"arn":"nope"}}]},
+		{"mode":7,"type":"x","name":"y","instances":[]}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Keep([]string{"aws_db_instance"})
+	if len(st.Identities) != 1 || len(st.Problems) != 1 || st.Problems[0].Kind != ProblemUnreadableResource {
+		t.Errorf("identities=%+v problems=%+v (an unreadable resource of unknown type must stay)", st.Identities, st.Problems)
+	}
+}

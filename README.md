@@ -2,7 +2,7 @@
 
 Find what's running outside your Terraform.
 
-`oos` compares the resources in an AWS account with the Terraform states you supply and reports the ones that no state tracks. The first supported resource type is RDS DB instances. More will follow.
+`oos` compares the resources in an AWS account with the Terraform states you supply and reports the ones that no state tracks. Supported so far: RDS DB instances and Application/Network Load Balancers. More will follow.
 
 `oos` reads Terraform state format version 4 (Terraform 0.12 and later, and OpenTofu).
 
@@ -13,24 +13,26 @@ Scan: complete
   source  ./app-infra (default) ✓ 10:42:00
   source  ./shared-infra (prod) ✓ 10:42:01
 
-1 import candidate(s): RDS instances with no match in the supplied states
+2 import candidate(s): resources with no match in the supplied states
 
-  analytics-db             eu-west-1       db.r6g.large     postgres 16.2    available    created 2025-03-02
+  analytics-db             eu-west-1       rds   db.r6g.large     postgres 16.2            available    created 2025-03-02
+  legacy-alb               eu-west-1       alb   internal         vpc-0a1b2c3d             active       created 2024-01-01
 
-2 tracked in state
-  legacy-reports           eu-west-1       ./shared-infra (prod) aws_db_instance.legacy (resource_id)
-  orders-db                eu-west-1       ./app-infra (default) aws_db_instance.orders (resource_id)
+3 tracked in state
+  orders-db                eu-west-1       rds   ./app-infra (default) aws_db_instance.orders (resource_id)
+  reports-db               eu-west-1       rds   ./shared-infra (prod) aws_db_instance.reports (resource_id)
+  web-alb                  eu-west-1       alb   ./app-infra (default) aws_lb.web (arn)
 
 1 not covered
-  billing-cluster-1        eu-west-1       member of an Aurora or Multi-AZ DB cluster
+  billing-cluster-1        eu-west-1       rds   member of an Aurora or Multi-AZ DB cluster
 
 Import candidates need a configuration review and a terraform plan before applying.
 Use --format json for full details (ARNs, resource and import IDs, tags).
 ```
 
-One database has no match in either state and needs a look, two are tracked (with the state and address that tracks them), and one is outside what `oos` checks so far.
+A database and a load balancer have no match in either state and need a look, three resources are tracked (with the state and address that tracks them), and one is outside what `oos` checks so far.
 
-> **Status:** early development. RDS DB instances only.
+> **Status:** early development. RDS DB instances and load balancers.
 
 ## Quick start
 
@@ -96,6 +98,7 @@ A state file works too, with `--state-file terraform.tfstate` (repeatable).
 |---|---|---|
 | `--profile` | AWS default chain | AWS profile for discovery |
 | `--region` | your profile's region | Region to scan, repeatable |
+| `--type` | all | Resource type to check, repeatable: `rds`, `lb` |
 | `--source` | `.` if no `--source` or `--state-file` | Terraform working directory, repeatable |
 | `--state-file` | | Terraform state JSON file, repeatable |
 | `--tf-binary` | `terraform` | `terraform` or `tofu` |
@@ -112,11 +115,18 @@ A state file works too, with `--state-file terraform.tfstate` (repeatable).
 | **Tracked in state** | A managed `aws_db_instance` in one of your states matches this instance. The report shows which state and address. |
 | **No match found** | No supplied state tracks it, and every state was read fully. These are **import candidates**: review the configuration and run `terraform plan` before importing. |
 | **Unable to verify** | No match, but a state could not be read fully, so the instance might be in it. |
-| **Not covered** | Outside what `oos` checks so far: Aurora and Multi-AZ DB cluster members, DocumentDB, Neptune. |
+| **Not covered** | Outside what `oos` checks so far: instances that belong to Aurora or Multi-AZ DB clusters, DocumentDB, Neptune, and Gateway Load Balancers. Classic Load Balancers are not checked at all yet. |
 
 If you supply several snapshots of the same state (for example a working directory and an older exported copy), only the newest is used, so an old copy cannot make something look tracked. The report says which one it used.
 
-"No match found" means *not in the states you supplied*. The instance may be managed by another state, by CloudFormation (its tags are in the `--format json` output), or by hand.
+"No match found" means *not in the states you supplied*. The resource may be managed by another state, by another tool, or by hand. When its tags show that CloudFormation, Elastic Beanstalk or Kubernetes (the AWS Load Balancer Controller) manages it, the report says so.
+
+### Supported resource types
+
+| Type | AWS | Terraform | Matched on |
+|---|---|---|---|
+| `rds` | RDS DB instances | `aws_db_instance` | resource ID (`db-…`), falling back to ARN or name only when the state has no resource ID |
+| `lb` | Application and Network Load Balancers | `aws_lb` (and its older name `aws_alb`) | load balancer ARN (a recreated load balancer gets a new one) |
 
 ### Cost (optional)
 
@@ -152,6 +162,8 @@ These are **all** RDS charges in those regions, not the cost of the import candi
         "sts:GetCallerIdentity",
         "rds:DescribeDBInstances",
         "rds:ListTagsForResource",
+        "elasticloadbalancing:DescribeLoadBalancers",
+        "elasticloadbalancing:DescribeTags",
         "ce:GetCostAndUsage"
       ],
       "Resource": "*"

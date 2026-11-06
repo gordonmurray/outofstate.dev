@@ -195,6 +195,7 @@ func TestReportsMatchSchema(t *testing.T) {
 		"old --no-cost flag":         {"--inventory-file", td("inventory.json"), "--state-file", td("app.tfstate.json"), "--no-cost"},
 		"--cost with fake inventory": {"--inventory-file", td("inventory.json"), "--state-file", td("app.tfstate.json"), "--cost"},
 		"duplicate state":            {"--inventory-file", td("inventory.json"), "--state-file", td("app.tfstate.json"), "--state-file", td("app-copy.tfstate.json")},
+		"load balancers":             {"--inventory-file", td("inventory_with_lb.json"), "--state-file", td("app.tfstate.json"), "--state-file", td("edge.tfstate.json")},
 	}
 	if err := os.WriteFile(td("app-copy.tfstate.json"), mustRead(t, td("app.tfstate.json")), 0o600); err != nil {
 		t.Fatal(err)
@@ -454,5 +455,124 @@ func TestOlderStateSnapshotCannotHideAGap(t *testing.T) {
 				t.Errorf("missing explanation of which snapshot was used:\n%s", out)
 			}
 		})
+	}
+}
+
+func TestLoadBalancers(t *testing.T) {
+	args := []string{"--inventory-file", td("inventory_with_lb.json"),
+		"--state-file", td("app.tfstate.json"), "--state-file", td("shared.tfstate.json"), "--state-file", td("edge.tfstate.json")}
+	code, out, _ := oos(t, append(args, "--format", "json")...)
+	if code != scan.ExitNoMatch {
+		t.Fatalf("exit = %d", code)
+	}
+	var rep struct {
+		Regions []struct {
+			Region       string `json:"region"`
+			ResourceType string `json:"resource_type"`
+		} `json:"regions"`
+		Findings []struct {
+			Identifier   string            `json:"identifier"`
+			ResourceType string            `json:"resource_type"`
+			Kind         string            `json:"kind"`
+			Status       string            `json:"status"`
+			ImportID     string            `json:"import_id"`
+			Details      map[string]string `json:"details"`
+			Matches      []struct {
+				Address   string `json:"address"`
+				MatchedOn string `json:"matched_on"`
+				Weak      bool   `json:"weak"`
+			} `json:"matches"`
+			Warnings []struct {
+				Kind string `json:"kind"`
+				Tool string `json:"tool"`
+			} `json:"warnings"`
+		} `json:"findings"`
+	}
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Regions) != 2 || rep.Regions[1].ResourceType != "aws_lb" {
+		t.Errorf("regions: %+v", rep.Regions)
+	}
+	by := map[string]int{}
+	for i, f := range rep.Findings {
+		by[f.Identifier] = i
+	}
+	web := rep.Findings[by["web-alb"]]
+	if web.Status != "tracked" || web.Kind != "alb" || web.Matches[0].MatchedOn != "arn" || web.Matches[0].Weak ||
+		web.Matches[0].Address != "aws_lb.web" || web.Details["scheme"] != "internet-facing" {
+		t.Errorf("web-alb: %+v", web)
+	}
+	legacy := rep.Findings[by["legacy-alb"]]
+	if legacy.Status != "no_match" || !strings.HasPrefix(legacy.ImportID, "arn:aws:elasticloadbalancing:") {
+		t.Errorf("legacy-alb (recreated since the state was written): %+v", legacy)
+	}
+	k8s := rep.Findings[by["k8s-ingress"]]
+	if k8s.Status != "no_match" || k8s.Kind != "nlb" || len(k8s.Warnings) != 1 || k8s.Warnings[0].Kind != "managed_by_other_tool" || k8s.Warnings[0].Tool != "kubernetes" {
+		t.Errorf("k8s-ingress: %+v", k8s)
+	}
+	if gw := rep.Findings[by["inspection"]]; gw.Status != "not_covered" || gw.Kind != "gwlb" {
+		t.Errorf("gateway: %+v", gw)
+	}
+
+	_, text, _ := oos(t, args...)
+	for _, want := range []string{
+		"  legacy-alb               eu-west-1       alb   internal         vpc-1",
+		"  web-alb                  eu-west-1       alb   testdata/edge.tfstate.json (unknown) aws_lb.web (arn)",
+		"  inspection               eu-west-1       gwlb  Gateway Load Balancer",
+		"k8s-ingress: its tags suggest it is managed by Kubernetes (AWS Load Balancer Controller), not Terraform",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("text missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestTypeFlag(t *testing.T) {
+	base := []string{"--format", "json", "--inventory-file", td("inventory_with_lb.json"), "--state-file", td("app.tfstate.json")}
+	count := func(args ...string) (int, map[string]int) {
+		code, out, stderr := oos(t, append(base, args...)...)
+		var rep struct {
+			Findings []struct {
+				ResourceType string `json:"resource_type"`
+			} `json:"findings"`
+		}
+		if code != scan.ExitFatal {
+			if err := json.Unmarshal([]byte(out), &rep); err != nil {
+				t.Fatalf("%v: %s", err, stderr)
+			}
+		}
+		m := map[string]int{}
+		for _, f := range rep.Findings {
+			m[f.ResourceType]++
+		}
+		return code, m
+	}
+	if _, m := count(); m["aws_db_instance"] != 4 || m["aws_lb"] != 4 {
+		t.Errorf("default (all types): %v", m)
+	}
+	if _, m := count("--type", "rds"); m["aws_db_instance"] != 4 || m["aws_lb"] != 0 {
+		t.Errorf("--type rds: %v", m)
+	}
+	if _, m := count("--type", "lb"); m["aws_db_instance"] != 0 || m["aws_lb"] != 4 {
+		t.Errorf("--type lb: %v", m)
+	}
+	if _, m := count("--type", "rds,alb"); m["aws_db_instance"] != 4 || m["aws_lb"] != 4 {
+		t.Errorf("--type rds,alb: %v", m)
+	}
+	if code, _ := count("--type", "s3"); code != scan.ExitFatal {
+		t.Errorf("unknown type: exit %d", code)
+	}
+}
+
+func TestOtherTypesCannotMakeAScanPartial(t *testing.T) {
+	// The state has a broken aws_lb entry. Checking only RDS must not be
+	// partial because of it; checking load balancers must be.
+	args := []string{"--inventory-file", td("inventory_with_lb.json"), "--state-file", td("app-with-bad-lb.tfstate.json")}
+	if code, out, _ := oos(t, append(args, "--type", "rds")...); code != scan.ExitNoMatch || strings.Contains(out, "PARTIAL") {
+		t.Errorf("--type rds: exit %d\n%s", code, out)
+	}
+	if code, _, _ := oos(t, args...); code != scan.ExitPartial {
+		t.Errorf("all types: exit %d, want %d", code, scan.ExitPartial)
 	}
 }

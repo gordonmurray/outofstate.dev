@@ -1,0 +1,51 @@
+{
+  "version": 4,
+  "terraform_version": "1.17.1",
+  "serial": 1,
+  "lineage": "edge-lineage",
+  "outputs": {},
+  "resources": [
+    {
+      "mode": "managed",
+      "type": "aws_lb",
+      "name": "web",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "arn": "arn:aws:elasticloadbalancing:eu-west-1:123456789012:loadbalancer/app/web-alb/0000000000000001",
+            "id": "arn:aws:elasticloadbalancing:eu-west-1:123456789012:loadbalancer/app/web-alb/0000000000000001",
+            "name": "web-alb",
+            "access_logs": [
+              {
+                "bucket": "OOS-SECRET-MARKER"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_alb",
+      "name": "old",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "arn": "arn:aws:elasticloadbalancing:eu-west-1:123456789012:loadbalancer/app/legacy-alb/00000000000000aa",
+            "id": "arn:aws:elasticloadbalancing:eu-west-1:123456789012:loadbalancer/app/legacy-alb/00000000000000aa",
+            "name": "legacy-alb",
+            "access_logs": [
+              {
+                "bucket": "OOS-SECRET-MARKER"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -139,8 +139,12 @@ type Input struct {
 	Inventory *discover.Inventory
 	Sources   []LoadedSource
 	Cost      *cost.Result // nil when cost was not requested
-	Version   string
-	Time      time.Time
+	// Types limits state to the Terraform types being checked, so problems
+	// with other types in a state cannot make the scan partial. Nil means
+	// every type.
+	Types   []string
+	Version string
+	Time    time.Time
 }
 
 // CostScope says what the cost figures cover.
@@ -172,6 +176,11 @@ func costBlock(c *cost.Result) *report.CostBlock {
 
 // Run matches and builds the report.
 func Run(in Input) *report.Report {
+	if in.Types != nil {
+		for i := range in.Sources {
+			restrictTypes(&in.Sources[i], in.Types)
+		}
+	}
 	srcs := make([]match.Source, len(in.Sources))
 	for i, s := range in.Sources {
 		srcs[i] = s.Source
@@ -197,9 +206,13 @@ func Run(in Input) *report.Report {
 		Warnings: warnings(res.Warnings),
 		Cost:     costBlock(in.Cost),
 	}
+	r.Scan.Regions = append(r.Scan.Regions, in.Inventory.RegionNames()...)
 	for _, reg := range in.Inventory.Regions {
-		r.Scan.Regions = append(r.Scan.Regions, reg.Region)
-		rr := report.Region{Region: reg.Region, Status: "ok", InstanceCount: len(reg.Instances)}
+		typ := reg.Type
+		if typ == "" {
+			typ = discover.TypeDBInstance
+		}
+		rr := report.Region{Region: reg.Region, ResourceType: typ, Status: "ok", InstanceCount: len(reg.Instances)}
 		if reg.Failed {
 			rr.Status, rr.ErrorCategory, rr.Error = "failed", string(reg.Error), reg.Error.Message()
 		}
@@ -225,6 +238,22 @@ func Run(in Input) *report.Report {
 	}
 	sortFindings(r.Findings)
 	return r
+}
+
+// restrictTypes keeps only the selected types in a loaded source and
+// recomputes whether it is partial.
+func restrictTypes(s *LoadedSource, types []string) {
+	if s.State == nil {
+		return
+	}
+	st := *s.State
+	st.Identities = append([]tfstate.Identity(nil), st.Identities...)
+	st.Problems = append([]tfstate.Problem(nil), st.Problems...)
+	st.Keep(types)
+	s.State = &st
+	if s.Status == match.SourcePartial && !st.Partial() {
+		s.Status = match.SourceOK
+	}
 }
 
 // ExitCode applies the exit-code rules to a completed report. Code 1 (fatal) is
@@ -253,7 +282,7 @@ func source(s LoadedSource) report.Source {
 		lineage, serial := s.State.Lineage, s.State.Serial
 		rs.Lineage, rs.Serial, rs.IdentityCount = &lineage, &serial, len(s.State.Identities)
 		for _, p := range s.State.Problems {
-			rs.Problems = append(rs.Problems, report.Problem{Address: p.Address, Kind: string(p.Kind)})
+			rs.Problems = append(rs.Problems, report.Problem{Address: p.Address, ResourceType: p.Type, Kind: string(p.Kind)})
 		}
 	}
 	return rs
@@ -262,18 +291,29 @@ func source(s LoadedSource) report.Source {
 func finding(f match.Finding) report.Finding {
 	in := f.Instance
 	rf := report.Finding{
-		ResourceType: "aws_db_instance", Status: string(f.Status), NotCoveredReason: in.NotCovered,
+		ResourceType: in.TerraformType(), Kind: in.Kind, Status: string(f.Status), NotCoveredReason: in.NotCovered,
 		Partition: in.Partition, AccountID: in.AccountID, Region: in.Region,
 		ARN: in.ARN, Identifier: in.Identifier, ResourceID: in.ResourceID,
-		ImportID: in.Identifier, // aws_db_instance imports by DB identifier
+		ImportID: in.Identifier, // aws_db_instance imports by DB identifier; aws_lb by ARN (below)
 		Engine:   in.Engine, EngineVersion: in.EngineVersion, Class: in.Class, InstanceStatus: in.Status,
 		Tags: in.Tags, Matches: []report.Match{}, Warnings: warnings(f.Warnings),
 	}
 	if rf.Tags == nil {
 		rf.Tags = map[string]string{}
 	}
+	if in.TerraformType() == discover.TypeLoadBalancer {
+		rf.ImportID = in.ARN
+		rf.Details = map[string]string{"scheme": in.Scheme, "vpc_id": in.VPCID}
+	}
+	if rf.Kind == "" {
+		rf.Kind = discover.KindRDS
+	}
 	if in.TagsUnavailable {
 		rf.Warnings = append(rf.Warnings, report.Warning{Kind: "tags_unavailable"})
+	}
+	// A hint, not a verdict: the tags suggest another tool manages it.
+	if in.ManagedBy != "" && (f.Status == match.StatusNoMatch || f.Status == match.StatusUnverified) {
+		rf.Warnings = append(rf.Warnings, report.Warning{Kind: "managed_by_other_tool", Tool: in.ManagedBy})
 	}
 	if !in.Created.IsZero() {
 		c := in.Created.UTC()
@@ -283,7 +323,7 @@ func finding(f match.Finding) report.Finding {
 		rf.Matches = append(rf.Matches, report.Match{
 			Source: m.Source, Workspace: m.Workspace, Address: m.Identity.Address,
 			Lifecycle: string(m.Identity.Lifecycle), DeposedKey: m.Identity.DeposedKey,
-			MatchedOn: string(m.MatchedOn), Weak: m.Weak(), Renamed: m.Renamed,
+			MatchedOn: string(m.MatchedOn), Weak: m.Weak, Renamed: m.Renamed,
 		})
 	}
 	return rf

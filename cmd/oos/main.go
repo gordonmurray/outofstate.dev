@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -31,6 +33,7 @@ func main() {
 type options struct {
 	profile       string
 	regions       []string
+	types         []string
 	sources       []string
 	stateFiles    []string
 	tfBinary      string
@@ -84,6 +87,7 @@ Exit codes:
 	f := cmd.Flags()
 	f.StringVar(&o.profile, "profile", "", "AWS profile for discovery and cost calls (default: the AWS SDK default chain)")
 	f.StringArrayVar(&o.regions, "region", nil, "region to scan, repeatable (default: the region from your AWS config)")
+	f.StringArrayVar(&o.types, "type", nil, "resource type to check, repeatable: rds, lb (default: all)")
 	f.StringArrayVar(&o.sources, "source", nil, "initialised Terraform working directory, repeatable (default: . when no --state-file is given)")
 	f.StringArrayVar(&o.stateFiles, "state-file", nil, "Terraform state JSON file, repeatable")
 	f.StringVar(&o.tfBinary, "tf-binary", "terraform", "binary used for 'state pull' (for example tofu)")
@@ -105,6 +109,10 @@ const sourceConcurrency = 4
 func scanCommand(o *options, stdout io.Writer, now func() time.Time) (int, error) {
 	if o.format != "text" && o.format != "json" {
 		return scan.ExitFatal, fmt.Errorf("--format must be text or json, not %q", o.format)
+	}
+	types, err := resolveTypes(o.types)
+	if err != nil {
+		return scan.ExitFatal, err
 	}
 
 	stateFiles := dedupePaths(o.stateFiles)
@@ -128,7 +136,7 @@ func scanCommand(o *options, stdout io.Writer, now func() time.Time) (int, error
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		inv, awsAPI, discErr = discoverInventory(ctx, o)
+		inv, awsAPI, discErr = discoverInventory(ctx, o, types)
 	}()
 	go func() {
 		defer wg.Done()
@@ -157,7 +165,7 @@ func scanCommand(o *options, stdout io.Writer, now func() time.Time) (int, error
 		}
 	}
 
-	rep := scan.Run(scan.Input{Inventory: inv, Sources: sources, Cost: costs, Version: version.Version, Time: now()})
+	rep := scan.Run(scan.Input{Inventory: inv, Sources: sources, Cost: costs, Types: types, Version: version.Version, Time: now()})
 
 	if err := write(o, stdout, rep); err != nil {
 		return scan.ExitFatal, err
@@ -167,10 +175,14 @@ func scanCommand(o *options, stdout io.Writer, now func() time.Time) (int, error
 
 // discoverInventory returns the inventory, and the AWS client when live
 // discovery was used (nil for --inventory-file, which also means no cost).
-func discoverInventory(ctx context.Context, o *options) (*discover.Inventory, *discover.AWS, error) {
+func discoverInventory(ctx context.Context, o *options, types []string) (*discover.Inventory, *discover.AWS, error) {
 	if o.inventoryFile != "" {
 		inv, err := discover.LoadFile(o.inventoryFile)
-		return inv, nil, err
+		if err != nil {
+			return nil, nil, err
+		}
+		inv.KeepTypes(types)
+		return inv, nil, nil
 	}
 	a, err := discover.NewAWS(ctx, o.profile)
 	if err != nil {
@@ -180,8 +192,37 @@ func discoverInventory(ctx context.Context, o *options) (*discover.Inventory, *d
 	if len(regions) == 0 && a.DefaultRegion() != "" {
 		regions = []string{a.DefaultRegion()}
 	}
-	inv, err := a.Discover(ctx, regions)
+	inv, err := a.Discover(ctx, regions, types...)
 	return inv, a, err
+}
+
+// typeNames maps --type values to Terraform resource types.
+var typeNames = map[string]string{
+	"rds": discover.TypeDBInstance, "aws_db_instance": discover.TypeDBInstance,
+	"lb": discover.TypeLoadBalancer, "alb": discover.TypeLoadBalancer, "nlb": discover.TypeLoadBalancer,
+	"aws_lb": discover.TypeLoadBalancer, "aws_alb": discover.TypeLoadBalancer,
+}
+
+// allTypes is the default for --type, in report order.
+var allTypes = []string{discover.TypeDBInstance, discover.TypeLoadBalancer}
+
+func resolveTypes(values []string) ([]string, error) {
+	if len(values) == 0 {
+		return allTypes, nil
+	}
+	var out []string
+	for _, v := range values {
+		for _, part := range strings.Split(v, ",") {
+			t, ok := typeNames[strings.ToLower(strings.TrimSpace(part))]
+			if !ok {
+				return nil, fmt.Errorf("unknown --type %q: use rds or lb", part)
+			}
+			if !slices.Contains(out, t) {
+				out = append(out, t)
+			}
+		}
+	}
+	return out, nil
 }
 
 func write(o *options, stdout io.Writer, rep *report.Report) error {

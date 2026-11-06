@@ -56,13 +56,14 @@ type Match struct {
 	Workspace string
 	Identity  tfstate.Identity
 	MatchedOn Key
+	// Weak is set when the match did not use the resource type's immutable
+	// identity (for RDS: an ARN or name match because the state entry had no
+	// resource ID).
+	Weak bool
 	// Renamed is set when the resource IDs match but the ARNs differ: the
 	// instance was renamed after the state was last written.
 	Renamed bool
 }
-
-// Weak reports whether the match did not use the immutable resource ID.
-func (m Match) Weak() bool { return m.MatchedOn != KeyResourceID }
 
 // WarningKind classifies a warning.
 type WarningKind string
@@ -215,10 +216,11 @@ func matchInstance(inst discover.Instance, sources []keptSource, stateComplete b
 
 	for si, src := range sources {
 		for _, id := range src.State.Identities {
-			if id.Partition != inst.Partition || id.AccountID != inst.AccountID || id.Region != inst.Region {
+			if id.Type != inst.TerraformType() ||
+				id.Partition != inst.Partition || id.AccountID != inst.AccountID || id.Region != inst.Region {
 				continue
 			}
-			key, renamed, stale := compare(inst, id)
+			key, weak, renamed, stale := compare(inst, id)
 			if stale {
 				staleSources = append(staleSources, src.Name)
 				staleAddrs = append(staleAddrs, id.Address)
@@ -227,7 +229,7 @@ func matchInstance(inst discover.Instance, sources []keptSource, stateComplete b
 				continue
 			}
 			f.Matches = append(f.Matches, Match{
-				Source: src.Name, Workspace: src.Workspace, Identity: id, MatchedOn: key, Renamed: renamed,
+				Source: src.Name, Workspace: src.Workspace, Identity: id, MatchedOn: key, Weak: weak, Renamed: renamed,
 			})
 			if !owners[src.owner] {
 				owners[src.owner] = true
@@ -262,30 +264,41 @@ func matchInstance(inst discover.Instance, sources []keptSource, stateComplete b
 	return f
 }
 
-// compare decides whether a state entry tracks an instance. When both sides have a resource ID, only the
+// compare decides whether a state entry tracks a resource of the same type.
+//
+// Load balancers: the ARN is the identity (it ends in a generated suffix, so
+// a recreated load balancer has a new ARN). An equal ARN is a strong match.
+//
+// RDS DB instances: when both sides have a resource ID, only the
 // resource ID decides; a different resource ID with the same ARN is a stale
 // state entry (the database was recreated) and never falls back to ARN or
 // name. Fallback is allowed only when the state entry has no resource ID:
 // an exact ARN, then the identifier within the same scope, is a weaker match.
-func compare(inst discover.Instance, id tfstate.Identity) (key Key, renamed, stale bool) {
+func compare(inst discover.Instance, id tfstate.Identity) (key Key, weak, renamed, stale bool) {
+	if inst.TerraformType() == discover.TypeLoadBalancer {
+		if inst.ARN != "" && inst.ARN == id.ARN {
+			return KeyARN, false, false, false
+		}
+		return "", false, false, false
+	}
 	if id.ResourceID != "" {
 		// The state recorded the immutable ID, so only that ID can confirm
 		// ownership. If AWS did not return one, the match cannot be verified.
 		if inst.ResourceID == "" {
-			return "", false, false
+			return "", false, false, false
 		}
 		if inst.ResourceID == id.ResourceID {
-			return KeyResourceID, inst.ARN != id.ARN, false
+			return KeyResourceID, false, inst.ARN != id.ARN, false
 		}
-		return "", false, inst.ARN != "" && inst.ARN == id.ARN
+		return "", false, false, inst.ARN != "" && inst.ARN == id.ARN
 	}
 	if inst.ARN != "" && inst.ARN == id.ARN {
-		return KeyARN, false, false
+		return KeyARN, true, false, false
 	}
 	if inst.Identifier != "" && strings.EqualFold(inst.Identifier, id.Identifier) {
-		return KeyIdentifier, false, false
+		return KeyIdentifier, true, false, false
 	}
-	return "", false, false
+	return "", false, false, false
 }
 
 // rank orders source statuses from best to worst.

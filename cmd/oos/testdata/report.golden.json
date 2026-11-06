@@ -15,6 +15,7 @@
   "regions": [
     {
       "region": "eu-west-1",
+      "resource_type": "aws_db_instance",
       "status": "ok",
       "instance_count": 4
     }
@@ -50,6 +51,7 @@
   "findings": [
     {
       "resource_type": "aws_db_instance",
+      "kind": "rds",
       "status": "no_match",
       "partition": "aws",
       "account_id": "123456789012",
@@ -71,6 +73,7 @@
     },
     {
       "resource_type": "aws_db_instance",
+      "kind": "rds",
       "status": "tracked",
       "partition": "aws",
       "account_id": "123456789012",
@@ -100,6 +103,7 @@
     },
     {
       "resource_type": "aws_db_instance",
+      "kind": "rds",
       "status": "tracked",
       "partition": "aws",
       "account_id": "123456789012",
@@ -131,6 +135,7 @@
     },
     {
       "resource_type": "aws_db_instance",
+      "kind": "rds",
       "status": "not_covered",
       "not_covered_reason": "member of an Aurora or Multi-AZ DB cluster",
       "partition": "aws",

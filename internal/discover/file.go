@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"time"
 )
 
@@ -18,6 +19,7 @@ type Inventory struct {
 // no instances, and makes the scan partial.
 type RegionResult struct {
 	Region    string
+	Type      string // Terraform type scanned; empty means aws_db_instance
 	Failed    bool
 	Error     ErrorCategory // fixed category, never raw API output
 	Instances []Instance
@@ -69,11 +71,39 @@ func (inv *Inventory) Instances() []Instance {
 	return out
 }
 
-// RegionNames lists every scanned region, in order.
-func (inv *Inventory) RegionNames() []string {
-	out := make([]string, 0, len(inv.Regions))
+// KeepTypes drops region results and resources for Terraform types not in
+// types.
+func (inv *Inventory) KeepTypes(types []string) {
+	var kept []RegionResult
 	for _, r := range inv.Regions {
-		out = append(out, r.Region)
+		t := r.Type
+		if t == "" {
+			t = TypeDBInstance
+		}
+		if !slices.Contains(types, t) {
+			continue
+		}
+		var insts []Instance
+		for _, i := range r.Instances {
+			if slices.Contains(types, i.TerraformType()) {
+				insts = append(insts, i)
+			}
+		}
+		r.Instances = insts
+		kept = append(kept, r)
+	}
+	inv.Regions = kept
+}
+
+// RegionNames lists every scanned region once, in order.
+func (inv *Inventory) RegionNames() []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, r := range inv.Regions {
+		if !seen[r.Region] {
+			seen[r.Region] = true
+			out = append(out, r.Region)
+		}
 	}
 	return out
 }
@@ -95,8 +125,13 @@ type inventoryFile struct {
 	AccountID string `json:"account_id"`
 	Regions   []struct {
 		Region    string `json:"region"`
+		Type      string `json:"type"` // default aws_db_instance
 		Error     string `json:"error"`
 		Instances []struct {
+			Type          string            `json:"type"`
+			LBType        string            `json:"lb_type"` // application, network, gateway
+			Scheme        string            `json:"scheme"`
+			VPCID         string            `json:"vpc_id"`
 			ARN           string            `json:"arn"`
 			Identifier    string            `json:"identifier"`
 			ResourceID    string            `json:"resource_id"`
@@ -126,13 +161,25 @@ func LoadFile(path string) (*Inventory, error) {
 	}
 	inv := &Inventory{Partition: f.Partition, AccountID: f.AccountID}
 	for _, r := range f.Regions {
-		rr := RegionResult{Region: r.Region, Failed: r.Error != ""}
+		rr := RegionResult{Region: r.Region, Type: r.Type, Failed: r.Error != ""}
 		if rr.Failed {
 			rr.Error = knownCategory(r.Error)
 		}
 		if !rr.Failed {
 			for _, i := range r.Instances {
+				typ := i.Type
+				if typ == "" {
+					typ = r.Type
+				}
+				if typ == "" {
+					typ = TypeDBInstance
+				}
+				kind := KindRDS
+				if typ == TypeLoadBalancer {
+					kind = LBKind(i.LBType)
+				}
 				inst := Instance{
+					Type: typ, Kind: kind, Scheme: i.Scheme, VPCID: i.VPCID,
 					Partition: f.Partition, AccountID: f.AccountID, Region: r.Region,
 					ARN: i.ARN, Identifier: i.Identifier, ResourceID: i.ResourceID,
 					Engine: i.Engine, EngineVersion: i.EngineVersion, Class: i.Class,

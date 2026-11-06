@@ -54,7 +54,7 @@ func WriteTextWith(w io.Writer, r *Report, o TextOptions) error {
 	}
 	for _, reg := range r.Regions {
 		if reg.Status == "failed" {
-			p.f("  region  %s %s: %s\n", clean(reg.Region), p.c(red, "FAILED"), clean(reg.Error))
+			p.f("  region  %s (%s) %s: %s\n", clean(reg.Region), typeLabel(reg.ResourceType), p.c(red, "FAILED"), clean(reg.Error))
 		}
 	}
 	p.costLines(r.Cost, scope)
@@ -62,7 +62,7 @@ func WriteTextWith(w io.Writer, r *Report, o TextOptions) error {
 
 	inScope := r.Summary.Tracked + r.Summary.NoMatch + r.Summary.UnableToVerify
 	if inScope == 0 {
-		p.f("0 in-scope RDS instances in %s\n\n", clean(scope))
+		p.f("0 in-scope resources in %s\n\n", clean(scope))
 	}
 
 	candidates := filter(r.Findings, "no_match")
@@ -71,16 +71,18 @@ func WriteTextWith(w io.Writer, r *Report, o TextOptions) error {
 	notCovered := filter(r.Findings, "not_covered")
 
 	if len(candidates) > 0 {
-		p.f("%s\n\n", p.c(bold, fmt.Sprintf("%d import candidate(s): RDS instances with no match in the supplied states", len(candidates))))
+		p.f("%s\n\n", p.c(bold, fmt.Sprintf("%d import candidate(s): resources with no match in the supplied states", len(candidates))))
 		for _, f := range candidates {
-			p.f("  %s %s %-16s %-16s %-12s %s\n", p.c(grey, padName(clean(f.Identifier))), padRegion(clean(f.Region)), clean(f.Class), clean(f.Engine+" "+f.EngineVersion), clean(f.InstanceStatus), created(f))
+			c1, c2 := columns(f)
+			p.f("  %s %s %s %-16s %-24s %-12s %s\n", p.c(grey, padName(clean(f.Identifier))), padRegion(clean(f.Region)), padKind(clean(f.Kind)), c1, c2, clean(f.InstanceStatus), created(f))
 		}
 		p.f("\n")
 	}
 	if len(unverified) > 0 {
 		p.f("%s\n\n", p.c(yellow, fmt.Sprintf("%d unable to verify: no match, but a source could not be read fully", len(unverified))))
 		for _, f := range unverified {
-			p.f("  %s %s %-16s %-16s %-12s %s\n", p.c(yellow, padName(clean(f.Identifier))), padRegion(clean(f.Region)), clean(f.Class), clean(f.Engine+" "+f.EngineVersion), clean(f.InstanceStatus), created(f))
+			c1, c2 := columns(f)
+			p.f("  %s %s %s %-16s %-24s %-12s %s\n", p.c(yellow, padName(clean(f.Identifier))), padRegion(clean(f.Region)), padKind(clean(f.Kind)), c1, c2, clean(f.InstanceStatus), created(f))
 		}
 		p.f("\n")
 	}
@@ -88,9 +90,9 @@ func WriteTextWith(w io.Writer, r *Report, o TextOptions) error {
 		p.f("%s\n", p.c(green, fmt.Sprintf("%d tracked in state", len(tracked))))
 		for _, f := range tracked {
 			for i, m := range f.Matches {
-				name, region := padName(clean(f.Identifier)), padRegion(clean(f.Region))
+				name, region, kind := padName(clean(f.Identifier)), padRegion(clean(f.Region)), padKind(clean(f.Kind))
 				if i > 0 {
-					name, region = padName(""), padRegion("")
+					name, region, kind = padName(""), padRegion(""), padKind("")
 				}
 				extra := " (" + m.MatchedOn
 				if m.Weak {
@@ -103,7 +105,7 @@ func WriteTextWith(w io.Writer, r *Report, o TextOptions) error {
 					extra += ", " + m.Lifecycle
 				}
 				extra += ")"
-				p.f("  %s %s %s (%s) %s%s\n", p.c(green, name), region, clean(m.Source), clean(m.Workspace), clean(m.Address), extra)
+				p.f("  %s %s %s %s (%s) %s%s\n", p.c(green, name), region, kind, clean(m.Source), clean(m.Workspace), clean(m.Address), extra)
 			}
 		}
 		p.f("\n")
@@ -111,7 +113,7 @@ func WriteTextWith(w io.Writer, r *Report, o TextOptions) error {
 	if len(notCovered) > 0 {
 		p.f("%s\n", p.c(dim, fmt.Sprintf("%d not covered", len(notCovered))))
 		for _, f := range notCovered {
-			p.f("  %s %s %s\n", p.c(dim, padName(clean(f.Identifier))), padRegion(clean(f.Region)), p.c(dim, f.NotCoveredReason))
+			p.f("  %s %s %s %s\n", p.c(dim, padName(clean(f.Identifier))), padRegion(clean(f.Region)), padKind(clean(f.Kind)), p.c(dim, f.NotCoveredReason))
 		}
 		p.f("\n")
 	}
@@ -235,6 +237,43 @@ const regionWidth = 15
 
 func padRegion(s string) string { return pad(s, regionWidth) }
 
+// kindWidth fits the longest kind label (gwlb).
+const kindWidth = 5
+
+func padKind(s string) string { return pad(s, kindWidth) }
+
+// columns returns the two type-specific columns for a resource row.
+func columns(f Finding) (string, string) {
+	switch f.ResourceType {
+	case "aws_lb":
+		return clean(f.Details["scheme"]), clean(f.Details["vpc_id"])
+	default:
+		return clean(f.Class), clean(f.Engine + " " + f.EngineVersion)
+	}
+}
+
+func typeLabel(resourceType string) string {
+	switch resourceType {
+	case "aws_lb":
+		return "load balancers"
+	case "", "aws_db_instance":
+		return "RDS DB instances"
+	}
+	return clean(resourceType)
+}
+
+func toolLabel(tool string) string {
+	switch tool {
+	case "cloudformation":
+		return "CloudFormation"
+	case "elastic_beanstalk":
+		return "Elastic Beanstalk"
+	case "kubernetes":
+		return "Kubernetes (AWS Load Balancer Controller)"
+	}
+	return clean(tool)
+}
+
 func pad(s string, width int) string {
 	n := len([]rune(s))
 	if n >= width {
@@ -280,8 +319,10 @@ func describe(w Warning) string {
 			strings.Join(addrs, ", ") + " in " + strings.Join(srcs, ", ")
 	case "duplicate_snapshot":
 		return "the same state snapshot was supplied more than once: " + strings.Join(srcs, ", ") + " (counted once)"
+	case "managed_by_other_tool":
+		return "its tags suggest it is managed by " + toolLabel(w.Tool) + ", not Terraform; check there before importing"
 	case "tags_unavailable":
-		return "tags could not be read (rds:ListTagsForResource)"
+		return "tags could not be read (check the tag-reading permissions in the README)"
 	case "diverged_copies":
 		if len(srcs) > 1 {
 			return "several versions of the same state were supplied; only the newest, " + srcs[0] +

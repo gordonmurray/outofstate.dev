@@ -36,6 +36,7 @@ func ident(addr, name, rid string) tfstate.Identity {
 
 func identIn(acct, region, addr, name, rid string) tfstate.Identity {
 	return tfstate.Identity{
+		Type:    "aws_db_instance",
 		Address: addr, Lifecycle: tfstate.LifecycleCurrent, SchemaVersion: 2,
 		ARN: arn(acct, region, name), Identifier: name, ResourceID: rid,
 		Partition: "aws", AccountID: acct, Region: region,
@@ -302,12 +303,6 @@ func TestNoInstances(t *testing.T) {
 	}
 }
 
-func TestWeak(t *testing.T) {
-	if (Match{MatchedOn: KeyResourceID}).Weak() || !(Match{MatchedOn: KeyARN}).Weak() || !(Match{MatchedOn: KeyIdentifier}).Weak() {
-		t.Error("Weak() wrong")
-	}
-}
-
 func TestClassify(t *testing.T) {
 	tests := []struct {
 		engine, cluster, want string
@@ -478,5 +473,81 @@ func TestSnapshotSelectionEdgeCases(t *testing.T) {
 			}
 			checkWarnings(t, "scan", res.Warnings, tt.warnings)
 		})
+	}
+}
+
+func lbARN(name, id string) string {
+	return "arn:aws:elasticloadbalancing:" + euw1 + ":" + acctA + ":loadbalancer/app/" + name + "/" + id
+}
+
+func lbInst(name, id string) discover.Instance {
+	return discover.Instance{Type: discover.TypeLoadBalancer, Kind: discover.KindALB,
+		Partition: "aws", AccountID: acctA, Region: euw1, ARN: lbARN(name, id), Identifier: name}
+}
+
+// lbIdent is a state entry for the load balancer with suffix 0000000000000001.
+func lbIdent(addr, name string) tfstate.Identity {
+	return tfstate.Identity{Type: "aws_lb", Address: addr, Lifecycle: tfstate.LifecycleCurrent,
+		ARN: lbARN(name, "0000000000000001"), Identifier: name, Partition: "aws", AccountID: acctA, Region: euw1}
+}
+
+func TestLoadBalancerMatching(t *testing.T) {
+	tests := []struct {
+		name   string
+		inst   discover.Instance
+		ids    []tfstate.Identity
+		status Status
+		weak   bool
+	}{
+		{"same ARN is a strong match", lbInst("web", "0000000000000001"),
+			[]tfstate.Identity{lbIdent("aws_lb.web", "web")}, StatusTracked, false},
+		{"consecutive hyphens in the name", lbInst("web--prod", "0000000000000001"),
+			[]tfstate.Identity{lbIdent("aws_lb.web", "web--prod")}, StatusTracked, false},
+		{"recreated with the same name: new ARN, no match", lbInst("web", "0000000000000002"),
+			[]tfstate.Identity{lbIdent("aws_lb.web", "web")}, StatusNoMatch, false},
+		{"same name in state is not enough", lbInst("web", "0000000000000002"),
+			[]tfstate.Identity{{Type: "aws_lb", Address: "aws_lb.web", Identifier: "web", Partition: "aws", AccountID: acctA, Region: euw1}}, StatusNoMatch, false},
+		{"an RDS entry never matches a load balancer", lbInst("orders", "0000000000000001"),
+			[]tfstate.Identity{ident("aws_db_instance.orders", "orders", "")}, StatusNoMatch, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res := Run([]discover.Instance{tt.inst}, []Source{src("a", "L1", 1, tt.ids...)})
+			f := res.Findings[0]
+			if f.Status != tt.status {
+				t.Fatalf("status = %s, want %s", f.Status, tt.status)
+			}
+			if tt.status == StatusTracked && (f.Matches[0].MatchedOn != KeyARN || f.Matches[0].Weak != tt.weak) {
+				t.Errorf("match = %+v", f.Matches[0])
+			}
+		})
+	}
+}
+
+func TestRDSNeverMatchesLoadBalancerEntries(t *testing.T) {
+	// A load balancer named like a database must not match by identifier.
+	res := Run([]discover.Instance{inst("orders", "db-1")}, []Source{src("a", "L1", 1, lbIdent("aws_lb.orders", "orders"))})
+	if res.Findings[0].Status != StatusNoMatch {
+		t.Errorf("status = %s", res.Findings[0].Status)
+	}
+}
+
+func TestRDSWeakMatches(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		inst discover.Instance
+		id   tfstate.Identity
+		key  Key
+		weak bool
+	}{
+		{"resource id: strong", inst("orders", "db-1"), ident("aws_db_instance.o", "orders", "db-1"), KeyResourceID, false},
+		{"ARN without a resource id in state: weak", inst("orders", "db-1"), ident("aws_db_instance.o", "orders", ""), KeyARN, true},
+		{"identifier only: weak", discover.Instance{Partition: "aws", AccountID: acctA, Region: euw1, Identifier: "orders", ResourceID: "db-1"}, ident("aws_db_instance.o", "orders", ""), KeyIdentifier, true},
+	} {
+		res := Run([]discover.Instance{tt.inst}, []Source{src("a", "L1", 1, tt.id)})
+		m := res.Findings[0].Matches
+		if len(m) != 1 || m[0].MatchedOn != tt.key || m[0].Weak != tt.weak {
+			t.Errorf("%s: %+v", tt.name, m)
+		}
 	}
 }
