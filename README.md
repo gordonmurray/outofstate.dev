@@ -94,7 +94,7 @@ RDS charges in us-west-2 (amortised, USD): $1,794.24 May–Oct 2026 · $499.05 7
   last 30 days: instances $227.26 · Multi-AZ $193.03 · storage $56.20 · proxy $21.51 · other $1.05
 ```
 
-These are **all** RDS charges in those regions, not the cost of the import candidates: AWS does not normally attribute RDS cost to individual instances. Each Cost Explorer request costs US$0.01 and a run with `--cost` makes two. If cost cannot be read (no permission, Cost Explorer not enabled), the report says why and everything else still works.
+These are **all** RDS charges in those regions, not the cost of the import candidates: AWS does not normally attribute RDS cost to individual instances. Each Cost Explorer request costs US$0.01 and a run with `--cost` makes at least two (more if results are paginated). If cost cannot be read (no permission, Cost Explorer not enabled), the report says why and everything else still works.
 
 ### Exit codes
 
