@@ -148,6 +148,10 @@ func scanCommand(o *options, stdout io.Writer, now func() time.Time) (int, error
 	var costs *cost.Result
 	if !o.noCost && awsAPI != nil {
 		costs = cost.Fetch(ctx, cost.NewClient(awsAPI.Config()), inv.Partition, inv.AccountID, inv.RegionNames(), now())
+		if ctx.Err() != nil {
+			// Ctrl-C during the cost calls is an interruption, not a cost error.
+			return scan.ExitFatal, errors.New("interrupted")
+		}
 	}
 
 	rep := scan.Run(scan.Input{Inventory: inv, Sources: sources, Cost: costs, Version: version.Version, Time: now()})

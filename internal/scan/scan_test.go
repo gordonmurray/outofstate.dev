@@ -34,7 +34,9 @@ func inventory() *discover.Inventory {
 }
 
 func TestCostBlockAndSchema(t *testing.T) {
-	schema, err := jsonschema.NewCompiler().Compile(filepath.Join("..", "..", "docs", "report.schema.json"))
+	c := jsonschema.NewCompiler()
+	c.AssertFormat()
+	schema, err := c.Compile(filepath.Join("..", "..", "docs", "report.schema.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,5 +76,42 @@ func TestCostBlockAndSchema(t *testing.T) {
 	u := costBlock(&cost.Result{Reason: cost.ReasonNotEnabled})
 	if u.Available || u.Reason != "cost_explorer_not_enabled" || !strings.Contains(u.Message, "not enabled") {
 		t.Errorf("%+v", u)
+	}
+}
+
+func TestSchemaRejectsBadCostBlocks(t *testing.T) {
+	c := jsonschema.NewCompiler()
+	c.AssertFormat()
+	schema, err := c.Compile(filepath.Join("..", "..", "docs", "report.schema.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	good := Run(Input{Inventory: inventory(), Version: "test", Time: time.Unix(0, 0), Cost: &cost.Result{Available: true, Currency: "USD",
+		Months: period("May–Oct 2026", "2026-05-01", "2026-11-01", "10", false),
+		Last30: period("7 Oct–5 Nov 2026", "2026-10-07", "2026-11-06", "1", false)}})
+	var buf bytes.Buffer
+	if err := report.WriteJSON(&buf, good); err != nil {
+		t.Fatal(err)
+	}
+	doc := buf.String()
+	tampered := map[string]string{
+		"available without periods":  strings.Replace(doc, `"periods"`, `"periodz"`, 1),
+		"unavailable without reason": strings.Replace(strings.Replace(doc, `"available": true`, `"available": false`, 1), `"scope"`, `"scope"`, 1),
+		"numeric amount":             strings.Replace(doc, `"total": "10"`, `"total": 10`, 1),
+		"float-like amount":          strings.Replace(doc, `"total": "10"`, `"total": "1e3"`, 1),
+		"missing bucket":             strings.Replace(doc, `"proxy": "0",`, ``, 1),
+		"bad date":                   strings.Replace(doc, `"start": "2026-05-01"`, `"start": "May 2026"`, 1),
+	}
+	for name, d := range tampered {
+		if d == doc {
+			t.Fatalf("%s: replacement did not apply", name)
+		}
+		v, err := jsonschema.UnmarshalJSON(strings.NewReader(d))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if schema.Validate(v) == nil {
+			t.Errorf("%s: schema accepted an invalid cost block", name)
+		}
 	}
 }
