@@ -21,6 +21,7 @@ builds:
       - -X github.com/gordonmurray/outofstate.dev/internal/version.Date={{.Date}}
     goos:
       - linux
+      - darwin
     goarch:
       - amd64
       - arm64
