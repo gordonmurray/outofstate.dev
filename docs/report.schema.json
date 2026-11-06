@@ -86,13 +86,41 @@
           "required": ["available"],
           "properties": {
             "available": { "type": "boolean" },
-            "reason": { "type": "string" }
-          }
+            "reason": { "type": "string", "description": "when unavailable: partition_not_supported, access_denied, cost_explorer_not_enabled, throttled, timeout, api_error, mixed_currency, data_unavailable" },
+            "message": { "type": "string" },
+            "scope": { "type": "string", "description": "what the totals cover: all RDS charges in the scanned account and regions, not the cost of particular findings" },
+            "metric": { "type": "string" },
+            "currency": { "type": "string" },
+            "periods": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["name", "label", "start", "end", "total", "estimated", "breakdown"],
+                "properties": {
+                  "name": { "enum": ["last_6_months", "last_30_days"] },
+                  "label": { "type": "string" },
+                  "start": { "type": "string", "format": "date", "description": "inclusive" },
+                  "end": { "type": "string", "format": "date", "description": "exclusive" },
+                  "total": { "$ref": "#/$defs/decimal" },
+                  "estimated": { "type": "boolean" },
+                  "breakdown": {
+                    "type": "object",
+                    "required": ["instances", "multi_az", "storage", "backup", "proxy", "other"],
+                    "additionalProperties": { "$ref": "#/$defs/decimal" }
+                  }
+                }
+              }
+            }
+          },
+          "if": { "properties": { "available": { "const": true } } },
+          "then": { "required": ["scope", "metric", "currency", "periods"] },
+          "else": { "required": ["reason"] }
         }
       ]
     }
   },
   "$defs": {
+    "decimal": { "type": "string", "pattern": "^-?[0-9]+(\\.[0-9]+)?$", "description": "exact decimal amount, never a float" },
     "finding": {
       "type": "object",
       "required": ["resource_type", "status", "partition", "account_id", "region", "arn", "identifier", "resource_id", "import_id", "engine", "engine_version", "class", "instance_status", "tags", "matches", "warnings"],

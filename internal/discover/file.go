@@ -69,6 +69,15 @@ func (inv *Inventory) Instances() []Instance {
 	return out
 }
 
+// RegionNames lists every scanned region, in order.
+func (inv *Inventory) RegionNames() []string {
+	out := make([]string, 0, len(inv.Regions))
+	for _, r := range inv.Regions {
+		out = append(out, r.Region)
+	}
+	return out
+}
+
 // Complete reports whether every region was scanned successfully.
 func (inv *Inventory) Complete() bool {
 	for _, r := range inv.Regions {

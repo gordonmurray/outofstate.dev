@@ -153,8 +153,5 @@
     }
   ],
   "warnings": [],
-  "cost": {
-    "available": false,
-    "reason": "not implemented yet"
-  }
+  "cost": null
 }

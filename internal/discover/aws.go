@@ -93,6 +93,9 @@ func newAWS(cfg aws.Config) *AWS {
 	}
 }
 
+// Config is the loaded AWS configuration, for other AWS clients (cost).
+func (a *AWS) Config() aws.Config { return a.cfg }
+
 // DefaultRegion is the region from the AWS configuration, if any.
 func (a *AWS) DefaultRegion() string { return a.cfg.Region }
 
