@@ -8,16 +8,36 @@ Find what's running outside your Terraform.
 
 > **Status:** early development. The current release only prints its version.
 
-## Install
+## Quick start
 
-Releases are published on GitHub for Linux (amd64 and arm64). With the [GitHub CLI](https://cli.github.com/) logged in:
+Install the latest release (Linux, amd64 or arm64) into `~/.local/bin`.
+
+While the repository is private, use the [GitHub CLI](https://cli.github.com/), logged in with `gh auth login`:
 
 ```bash
-scripts/install.sh                  # latest release
-scripts/install.sh --version v0.3.1 # a specific release
+gh api -H "Accept: application/vnd.github.raw" "repos/gordonmurray/outofstate.dev/contents/scripts/install.sh?ref=main" | bash
 ```
 
-The script downloads the release into a fresh temporary directory, verifies its SHA-256 checksum, and installs `oos` into `~/.local/bin`.
+Once the repository is public, plain `curl` works too:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/gordonmurray/outofstate.dev/main/scripts/install.sh | bash
+```
+
+Then check it. If `~/.local/bin` is not on your `PATH` yet, the installer says so. Add it with `export PATH="$HOME/.local/bin:$PATH"` (and to your shell profile).
+
+```bash
+oos --version
+```
+
+To install a specific release, pass options after `bash -s --`:
+
+```bash
+... | bash -s -- --version v0.3.0
+... | bash -s -- --dest /usr/local/bin
+```
+
+The script downloads the release into a fresh temporary directory, verifies its SHA-256 checksum, and only then installs `oos`. From a clone of the repository you can also run `scripts/install.sh` directly.
 
 ## Usage (planned)
 
@@ -50,7 +70,3 @@ git push origin v0.1.0
 ```
 
 The `Release` workflow tests the tag, builds the binaries with GoReleaser and publishes a GitHub Release.
-
-## License
-
-Apache-2.0
