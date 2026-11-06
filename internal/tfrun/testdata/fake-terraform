@@ -1,0 +1,43 @@
+#!/bin/sh
+# Fake terraform for tests. Behaviour is chosen with FAKE_MODE.
+# Every mode that writes to stderr includes a secret marker, which must
+# never appear in any oos output.
+if [ -n "$FAKE_ARGV_OUT" ]; then printf '%s\n' "$@" > "$FAKE_ARGV_OUT.$2"; fi
+chdir="$1"; shift
+cmd="$1 $2"
+marker="OOS-SECRET-MARKER"
+
+# Record the environment the child saw, for the environment tests.
+if [ -n "$FAKE_ENV_OUT" ]; then env > "$FAKE_ENV_OUT.$1"; fi
+
+case "$cmd" in
+  "workspace show")
+    case "$FAKE_MODE" in
+      ws_fail) echo "Error: Backend initialization required, please run \"terraform init\" $marker" >&2; exit 1 ;;
+    esac
+    echo "${FAKE_WS:-${TF_WORKSPACE:-default}}"; exit 0 ;;
+  "state pull")
+    case "$FAKE_MODE" in
+      ok) cat "$FAKE_STATE"; exit 0 ;;
+      empty) exit 0 ;;
+      invalid) echo "not json $marker"; exit 0 ;;
+      auth) echo "Error: error loading state: AccessDenied: Access Denied status code: 403 $marker" >&2; exit 1 ;;
+      auth_short) echo "$marker" >&2; exit 1 ;;
+      workspace_missing) echo "Error: Currently selected workspace \"x\" does not exist $marker" >&2; exit 1 ;;
+      version) echo "Error: state snapshot was created by Terraform v9.9.9, which is newer than current $marker" >&2; exit 1 ;;
+      exit7) echo "something odd $marker" >&2; exit 7 ;;
+      hang) sleep 30; exit 0 ;;
+      big) head -c 5000000 /dev/zero; exit 0 ;;
+      bigerr) head -c 3000000 /dev/zero >&2; exit 1 ;;
+      stdin) cat; exit 0 ;;
+      helper)
+        # Start a helper that keeps stdout open, record its PID, then exit.
+        sleep 30 &
+        echo $! > "$FAKE_HELPER_PID"
+        cat "$FAKE_STATE"; exit 0 ;;
+      exact) head -c "$FAKE_BYTES" /dev/zero; exit 0 ;;
+      tflog) echo "TF_LOG=$TF_LOG $marker" >&2; cat "$FAKE_STATE"; exit 0 ;;
+    esac ;;
+esac
+echo "unexpected: $cmd" >&2
+exit 99

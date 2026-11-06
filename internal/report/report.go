@@ -55,6 +55,7 @@ type Source struct {
 	Status        string    `json:"status"` // ok, partial, failed
 	ErrorCategory string    `json:"error_category,omitempty"`
 	Error         string    `json:"error,omitempty"` // fixed message for the category
+	Hint          string    `json:"hint,omitempty"`  // command to run by hand to see Terraform's own output
 	Lineage       *string   `json:"lineage"`         // null when the state could not be read
 	Serial        *int64    `json:"serial"`          // null when the state could not be read
 	IdentityCount int       `json:"identity_count"`
