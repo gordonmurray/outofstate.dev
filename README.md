@@ -68,7 +68,3 @@ git push origin v0.1.0
 ```
 
 The `Release` workflow tests the tag, builds the binaries with GoReleaser and publishes a GitHub Release.
-
-## License
-
-Apache-2.0
