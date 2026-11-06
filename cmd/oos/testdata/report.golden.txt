@@ -14,15 +14,5 @@ Scan: complete
 1 not covered
   billing-cluster-1        member of an Aurora or Multi-AZ DB cluster
 
-Evidence
-  analytics-db
-    arn          arn:aws:rds:eu-west-1:123456789012:db:analytics-db
-    resource id  db-ANALYTICS
-    import id    analytics-db
-    region       eu-west-1
-    created      2025-03-02
-    engine       postgres 16.2 · db.r6g.large · status available
-    tags         team=data
-    checked      testdata/app.tfstate.json (unknown, ok), testdata/shared.tfstate.json (unknown, ok)
-
 Import candidates need a configuration review and a terraform plan before applying.
+Use --format json for full details (ARNs, resource and import IDs, tags).

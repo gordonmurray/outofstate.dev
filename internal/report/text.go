@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -139,30 +138,9 @@ func WriteTextWith(w io.Writer, r *Report, o TextOptions) error {
 		p.f("\n")
 	}
 
-	evidence := append(append([]Finding{}, candidates...), unverified...)
-	if len(evidence) > 0 {
-		var checked []string
-		for _, s := range r.Sources {
-			checked = append(checked, clean(s.Name)+" ("+clean(s.Workspace)+", "+s.Status+")")
-		}
-		p.f("Evidence\n")
-		for _, f := range evidence {
-			p.f("  %s\n", clean(f.Identifier))
-			p.f("    arn          %s\n", clean(f.ARN))
-			p.f("    resource id  %s\n", clean(f.ResourceID))
-			p.f("    import id    %s\n", clean(f.ImportID))
-			p.f("    region       %s\n", clean(f.Region))
-			if f.Created != nil {
-				p.f("    created      %s\n", f.Created.UTC().Format("2006-01-02"))
-			}
-			p.f("    engine       %s · %s · status %s\n", clean(f.Engine+" "+f.EngineVersion), clean(f.Class), clean(f.InstanceStatus))
-			if len(f.Tags) > 0 {
-				p.f("    tags         %s\n", tags(f.Tags))
-			}
-			p.f("    checked      %s\n", strings.Join(checked, ", "))
-		}
-		p.f("\n")
+	if len(candidates)+len(unverified) > 0 {
 		p.f("Import candidates need a configuration review and a terraform plan before applying.\n")
+		p.f("%s\n", p.c(dim, "Use --format json for full details (ARNs, resource and import IDs, tags)."))
 	}
 	return p.err
 }
@@ -303,19 +281,6 @@ func describe(w Warning) string {
 	default:
 		return w.Kind
 	}
-}
-
-func tags(m map[string]string) string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	parts := make([]string, 0, len(keys))
-	for _, k := range keys {
-		parts = append(parts, clean(k)+"="+clean(m[k]))
-	}
-	return strings.Join(parts, ", ")
 }
 
 func cleanAll(ss []string) []string {

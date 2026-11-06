@@ -21,7 +21,7 @@ type Report struct {
 	Summary       Summary    `json:"summary"`
 	Findings      []Finding  `json:"findings"`
 	Warnings      []Warning  `json:"warnings"`
-	Cost          *CostBlock `json:"cost"` // nil when cost was not requested (--no-cost)
+	Cost          *CostBlock `json:"cost"` // nil when cost was not requested (no --cost)
 }
 
 // Scan describes the run.

@@ -80,7 +80,7 @@
     "warnings": { "type": "array", "items": { "$ref": "#/$defs/warning" } },
     "cost": {
       "oneOf": [
-        { "type": "null", "description": "cost was not requested (--no-cost)" },
+        { "type": "null", "description": "cost was not requested (--cost not given)" },
         {
           "type": "object",
           "required": ["available"],
