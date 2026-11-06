@@ -1,0 +1,390 @@
+package match
+
+import (
+	"slices"
+	"testing"
+
+	"github.com/gordonmurray/outofstate.dev/internal/discover"
+	"github.com/gordonmurray/outofstate.dev/internal/tfstate"
+)
+
+const (
+	acctA = "111111111111"
+	acctB = "222222222222"
+	euw1  = "eu-west-1"
+	use1  = "us-east-1"
+)
+
+func arn(acct, region, name string) string {
+	return "arn:aws:rds:" + region + ":" + acct + ":db:" + name
+}
+
+func inst(name, rid string) discover.Instance {
+	return instIn(acctA, euw1, name, rid)
+}
+
+func instIn(acct, region, name, rid string) discover.Instance {
+	return discover.Instance{
+		Partition: "aws", AccountID: acct, Region: region,
+		ARN: arn(acct, region, name), Identifier: name, ResourceID: rid,
+	}
+}
+
+func ident(addr, name, rid string) tfstate.Identity {
+	return identIn(acctA, euw1, addr, name, rid)
+}
+
+func identIn(acct, region, addr, name, rid string) tfstate.Identity {
+	return tfstate.Identity{
+		Address: addr, Lifecycle: tfstate.LifecycleCurrent, SchemaVersion: 2,
+		ARN: arn(acct, region, name), Identifier: name, ResourceID: rid,
+		Partition: "aws", AccountID: acct, Region: region,
+	}
+}
+
+func src(name, lineage string, serial int64, ids ...tfstate.Identity) Source {
+	return Source{Name: name, Workspace: "default", Status: SourceOK,
+		State: &tfstate.State{Lineage: lineage, Serial: serial, Identities: ids}}
+}
+
+func failed(name string) Source {
+	return Source{Name: name, Workspace: "default", Status: SourceFailed}
+}
+
+func partial(s Source) Source { s.Status = SourcePartial; return s }
+
+func hasWarning(ws []Warning, k WarningKind) bool {
+	for _, w := range ws {
+		if w.Kind == k {
+			return true
+		}
+	}
+	return false
+}
+
+func TestRun(t *testing.T) {
+	tests := []struct {
+		name      string
+		instances []discover.Instance
+		sources   []Source
+		// expectations for the first finding
+		status       Status
+		keys         []Key
+		renamed      bool
+		warnings     []WarningKind
+		scanWarnings []WarningKind
+		complete     bool
+	}{
+		{
+			name:      "match on resource id",
+			instances: []discover.Instance{inst("orders", "db-1")},
+			sources:   []Source{src("a", "L1", 1, ident("aws_db_instance.orders", "orders", "db-1"))},
+			status:    StatusTracked, keys: []Key{KeyResourceID}, complete: true,
+		},
+		{
+			name:      "recreated database: same ARN, new resource id",
+			instances: []discover.Instance{inst("orders", "db-NEW")},
+			sources:   []Source{src("a", "L1", 1, ident("aws_db_instance.orders", "orders", "db-OLD"))},
+			status:    StatusNoMatch, warnings: []WarningKind{WarnStaleStateEntry}, complete: true,
+		},
+		{
+			name:      "renamed since state was written",
+			instances: []discover.Instance{inst("orders-v2", "db-1")},
+			sources:   []Source{src("a", "L1", 1, ident("aws_db_instance.orders", "orders", "db-1"))},
+			status:    StatusTracked, keys: []Key{KeyResourceID}, renamed: true, complete: true,
+		},
+		{
+			name:      "same identifier in another account",
+			instances: []discover.Instance{inst("orders", "db-1")},
+			sources:   []Source{src("a", "L1", 1, identIn(acctB, euw1, "aws_db_instance.orders", "orders", ""))},
+			status:    StatusNoMatch, complete: true,
+		},
+		{
+			name:      "same identifier and resource id in another region",
+			instances: []discover.Instance{inst("orders", "db-1")},
+			sources:   []Source{src("a", "L1", 1, identIn(acctA, use1, "aws_db_instance.orders", "orders", "db-1"))},
+			status:    StatusNoMatch, complete: true,
+		},
+		{
+			name:      "state entry without resource id matches on ARN (weak)",
+			instances: []discover.Instance{inst("orders", "db-1")},
+			sources:   []Source{src("a", "L1", 1, ident("aws_db_instance.orders", "orders", ""))},
+			status:    StatusTracked, keys: []Key{KeyARN}, complete: true,
+		},
+		{
+			name:      "identifier starting with db- is matched by ARN, not mistaken for a resource id",
+			instances: []discover.Instance{inst("db-reports", "db-REAL")},
+			sources:   []Source{src("a", "L1", 1, ident("aws_db_instance.r", "db-reports", ""))},
+			status:    StatusTracked, keys: []Key{KeyARN}, complete: true,
+		},
+		{
+			name:      "deposed object matches the old instance",
+			instances: []discover.Instance{inst("old", "db-OLD")},
+			sources: []Source{src("a", "L1", 1,
+				ident("aws_db_instance.cbd", "new", "db-NEW"),
+				func() tfstate.Identity {
+					i := ident("aws_db_instance.cbd", "old", "db-OLD")
+					i.Lifecycle, i.DeposedKey = tfstate.LifecycleDeposed, "00000001"
+					return i
+				}())},
+			status: StatusTracked, keys: []Key{KeyResourceID}, complete: true,
+		},
+		{
+			name:      "two different states manage it",
+			instances: []discover.Instance{inst("orders", "db-1")},
+			sources: []Source{
+				src("a", "L1", 1, ident("aws_db_instance.orders", "orders", "db-1")),
+				src("b", "L2", 1, ident("aws_db_instance.db", "orders", "db-1")),
+			},
+			status: StatusTracked, keys: []Key{KeyResourceID, KeyResourceID},
+			warnings: []WarningKind{WarnMultipleOwners}, complete: true,
+		},
+		{
+			name:      "mixed keys across states",
+			instances: []discover.Instance{inst("orders", "db-1")},
+			sources: []Source{
+				src("a", "L1", 1, ident("aws_db_instance.orders", "orders", "db-1")),
+				src("b", "L2", 1, ident("aws_db_instance.db", "orders", "")),
+			},
+			status: StatusTracked, keys: []Key{KeyResourceID, KeyARN},
+			warnings: []WarningKind{WarnMultipleOwners}, complete: true,
+		},
+		{
+			name:      "same snapshot supplied twice counts once",
+			instances: []discover.Instance{inst("orders", "db-1")},
+			sources: []Source{
+				src("./infra", "L1", 5, ident("aws_db_instance.orders", "orders", "db-1")),
+				src("export.json", "L1", 5, ident("aws_db_instance.orders", "orders", "db-1")),
+			},
+			status: StatusTracked, keys: []Key{KeyResourceID},
+			scanWarnings: []WarningKind{WarnDuplicateSnapshot}, complete: true,
+		},
+		{
+			name:      "same lineage at different serials is one owner",
+			instances: []discover.Instance{inst("orders", "db-1")},
+			sources: []Source{
+				src("./infra", "L1", 6, ident("aws_db_instance.orders", "orders", "db-1")),
+				src("old-export.json", "L1", 5, ident("aws_db_instance.orders", "orders", "db-1")),
+			},
+			status: StatusTracked, keys: []Key{KeyResourceID, KeyResourceID},
+			scanWarnings: []WarningKind{WarnDivergedCopies}, complete: true,
+		},
+		{
+			name:      "states without lineage are never merged",
+			instances: []discover.Instance{inst("orders", "db-1")},
+			sources: []Source{
+				src("x.json", "", 1, ident("aws_db_instance.orders", "orders", "db-1")),
+				src("y.json", "", 1, ident("aws_db_instance.orders", "orders", "db-1")),
+			},
+			status: StatusTracked, keys: []Key{KeyResourceID, KeyResourceID},
+			warnings: []WarningKind{WarnMultipleOwners}, complete: true,
+		},
+		{
+			name:      "two addresses in one state",
+			instances: []discover.Instance{inst("orders", "db-1")},
+			sources: []Source{src("a", "L1", 1,
+				ident("aws_db_instance.orders", "orders", "db-1"),
+				ident("module.copy.aws_db_instance.orders", "orders", "db-1"))},
+			status: StatusTracked, keys: []Key{KeyResourceID, KeyResourceID},
+			warnings: []WarningKind{WarnMultipleAddresses}, complete: true,
+		},
+		{
+			name:      "stale entry in one state, real match in another",
+			instances: []discover.Instance{inst("orders", "db-NEW")},
+			sources: []Source{
+				src("a", "L1", 1, ident("aws_db_instance.old", "orders", "db-OLD")),
+				src("b", "L2", 1, ident("aws_db_instance.orders", "orders", "db-NEW")),
+			},
+			status: StatusTracked, keys: []Key{KeyResourceID},
+			warnings: []WarningKind{WarnStaleStateEntry}, complete: true,
+		},
+		{
+			name:      "a failed source makes unmatched instances unverifiable",
+			instances: []discover.Instance{inst("orders", "db-1")},
+			sources:   []Source{src("a", "L1", 1), failed("b")},
+			status:    StatusUnverified, complete: false,
+		},
+		{
+			name:      "a partial source makes unmatched instances unverifiable",
+			instances: []discover.Instance{inst("orders", "db-1")},
+			sources:   []Source{partial(src("a", "L1", 1))},
+			status:    StatusUnverified, complete: false,
+		},
+		{
+			name:      "matched instances stay tracked when another source failed",
+			instances: []discover.Instance{inst("orders", "db-1")},
+			sources:   []Source{src("a", "L1", 1, ident("aws_db_instance.orders", "orders", "db-1")), failed("b")},
+			status:    StatusTracked, keys: []Key{KeyResourceID}, complete: false,
+		},
+		{
+			name: "not covered instances are not matched",
+			instances: []discover.Instance{func() discover.Instance {
+				i := inst("aurora-1", "db-A")
+				i.ClusterID = "aurora"
+				discover.Classify(&i)
+				return i
+			}()},
+			sources: []Source{src("a", "L1", 1, ident("aws_db_instance.x", "aurora-1", "db-A"))},
+			status:  StatusNotCovered, complete: true,
+		},
+		{
+			name:      "instance without resource id never matches a state entry that has one",
+			instances: []discover.Instance{instIn(acctA, euw1, "orders", "")},
+			sources:   []Source{src("a", "L1", 1, ident("aws_db_instance.orders", "orders", "db-1"))},
+			status:    StatusNoMatch, complete: true,
+		},
+		{
+			name:      "identifier fallback when neither side has an ARN match and the state entry has no resource id",
+			instances: []discover.Instance{{Partition: "aws", AccountID: acctA, Region: euw1, Identifier: "orders", ResourceID: "db-1"}},
+			sources:   []Source{src("a", "L1", 1, ident("aws_db_instance.orders", "orders", ""))},
+			status:    StatusTracked, keys: []Key{KeyIdentifier}, complete: true,
+		},
+		{
+			name:      "same account, region and ids in another partition",
+			instances: []discover.Instance{inst("orders", "db-1")},
+			sources: []Source{src("a", "L1", 1, func() tfstate.Identity {
+				i := ident("aws_db_instance.orders", "orders", "db-1")
+				i.Partition = "aws-us-gov"
+				return i
+			}())},
+			status: StatusNoMatch, complete: true,
+		},
+		{
+			name:      "empty values are never compared",
+			instances: []discover.Instance{{Partition: "aws", AccountID: acctA, Region: euw1}},
+			sources: []Source{src("a", "L1", 1, tfstate.Identity{
+				Address: "aws_db_instance.blank", Partition: "aws", AccountID: acctA, Region: euw1})},
+			status: StatusNoMatch, complete: true,
+		},
+		{
+			name:      "a match from a partial source still counts",
+			instances: []discover.Instance{inst("orders", "db-1")},
+			sources:   []Source{partial(src("a", "L1", 1, ident("aws_db_instance.orders", "orders", "db-1")))},
+			status:    StatusTracked, keys: []Key{KeyResourceID}, complete: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res := Run(tt.instances, tt.sources)
+			if res.StateComplete != tt.complete {
+				t.Errorf("StateComplete = %v, want %v", res.StateComplete, tt.complete)
+			}
+			if len(res.Findings) != len(tt.instances) {
+				t.Fatalf("findings = %d", len(res.Findings))
+			}
+			f := res.Findings[0]
+			if f.Status != tt.status {
+				t.Errorf("Status = %s, want %s", f.Status, tt.status)
+			}
+			var keys []Key
+			renamed := false
+			for _, m := range f.Matches {
+				keys = append(keys, m.MatchedOn)
+				renamed = renamed || m.Renamed
+			}
+			if !slices.Equal(keys, tt.keys) {
+				t.Errorf("keys = %v, want %v", keys, tt.keys)
+			}
+			if renamed != tt.renamed {
+				t.Errorf("renamed = %v, want %v", renamed, tt.renamed)
+			}
+			checkWarnings(t, "finding", f.Warnings, tt.warnings)
+			checkWarnings(t, "scan", res.Warnings, tt.scanWarnings)
+		})
+	}
+}
+
+func TestNoInstances(t *testing.T) {
+	res := Run(nil, []Source{src("a", "L1", 1)})
+	if len(res.Findings) != 0 || !res.StateComplete {
+		t.Errorf("%+v", res)
+	}
+}
+
+func TestWeak(t *testing.T) {
+	if (Match{MatchedOn: KeyResourceID}).Weak() || !(Match{MatchedOn: KeyARN}).Weak() || !(Match{MatchedOn: KeyIdentifier}).Weak() {
+		t.Error("Weak() wrong")
+	}
+}
+
+func TestClassify(t *testing.T) {
+	tests := []struct {
+		engine, cluster, want string
+	}{
+		{"postgres", "", ""},
+		{"mysql", "", ""},
+		{"aurora-postgresql", "my-cluster", discover.NotCoveredClusterMember},
+		{"mysql", "multi-az-cluster", discover.NotCoveredClusterMember},
+		{"docdb", "docdb-cluster", discover.NotCoveredDocumentDB},
+		{"neptune", "neptune-cluster", discover.NotCoveredNeptune},
+	}
+	for _, tt := range tests {
+		i := discover.Instance{Engine: tt.engine, ClusterID: tt.cluster}
+		discover.Classify(&i)
+		if i.NotCovered != tt.want {
+			t.Errorf("Classify(%s, %q) = %q, want %q", tt.engine, tt.cluster, i.NotCovered, tt.want)
+		}
+	}
+}
+
+func checkWarnings(t *testing.T, what string, got []Warning, want []WarningKind) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Errorf("%s warnings = %+v, want %v", what, got, want)
+		return
+	}
+	for _, k := range want {
+		if !hasWarning(got, k) {
+			t.Errorf("%s warnings = %+v, missing %s", what, got, k)
+		}
+	}
+}
+
+func TestWarningDetails(t *testing.T) {
+	res := Run([]discover.Instance{inst("orders", "db-NEW")}, []Source{
+		src("a", "L1", 1,
+			ident("aws_db_instance.old", "orders", "db-OLD"),
+			ident("aws_db_instance.orders", "orders", "db-NEW"),
+			ident("module.copy.aws_db_instance.orders", "orders", "db-NEW")),
+		src("b", "L2", 1, ident("aws_db_instance.db", "orders", "db-NEW")),
+	})
+	f := res.Findings[0]
+	byKind := map[WarningKind]Warning{}
+	for _, w := range f.Warnings {
+		byKind[w.Kind] = w
+	}
+	if w := byKind[WarnStaleStateEntry]; !slices.Equal(w.Sources, []string{"a"}) || !slices.Equal(w.Addresses, []string{"aws_db_instance.old"}) {
+		t.Errorf("stale: %+v", w)
+	}
+	if w := byKind[WarnMultipleAddresses]; !slices.Equal(w.Sources, []string{"a"}) ||
+		!slices.Equal(w.Addresses, []string{"aws_db_instance.orders", "module.copy.aws_db_instance.orders"}) {
+		t.Errorf("multiple addresses: %+v", w)
+	}
+	if w := byKind[WarnMultipleOwners]; !slices.Equal(w.Sources, []string{"a", "b"}) {
+		t.Errorf("multiple owners: %+v", w)
+	}
+
+	m := f.Matches[0]
+	if m.Source != "a" || m.Workspace != "default" || m.Identity.Address != "aws_db_instance.orders" || m.MatchedOn != KeyResourceID {
+		t.Errorf("match metadata: %+v", m)
+	}
+}
+
+func TestScanWarningDetails(t *testing.T) {
+	res := Run(nil, []Source{
+		src("./infra", "L1", 6),
+		src("copy.json", "L1", 6),
+		src("old.json", "L1", 5),
+	})
+	byKind := map[WarningKind]Warning{}
+	for _, w := range res.Warnings {
+		byKind[w.Kind] = w
+	}
+	if w := byKind[WarnDuplicateSnapshot]; !slices.Equal(w.Sources, []string{"./infra", "copy.json"}) {
+		t.Errorf("duplicate: %+v", w)
+	}
+	if w := byKind[WarnDivergedCopies]; !slices.Equal(w.Sources, []string{"./infra", "old.json"}) {
+		t.Errorf("diverged: %+v", w)
+	}
+}
