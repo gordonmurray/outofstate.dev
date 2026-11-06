@@ -13,7 +13,7 @@ Install the latest release (Linux, amd64 or arm64) into `~/.local/bin`.
 While the repository is private, use the [GitHub CLI](https://cli.github.com/), logged in with `gh auth login`:
 
 ```bash
-gh api -H "Accept: application/vnd.github.raw" repos/gordonmurray/outofstate.dev/contents/scripts/install.sh | bash
+gh api -H "Accept: application/vnd.github.raw" "repos/gordonmurray/outofstate.dev/contents/scripts/install.sh?ref=main" | bash
 ```
 
 Once the repository is public, plain `curl` works too:
@@ -22,7 +22,7 @@ Once the repository is public, plain `curl` works too:
 curl -fsSL https://raw.githubusercontent.com/gordonmurray/outofstate.dev/main/scripts/install.sh | bash
 ```
 
-Then check it:
+Then check it. If `~/.local/bin` is not on your `PATH` yet, the installer says so. Add it with `export PATH="$HOME/.local/bin:$PATH"` (and to your shell profile).
 
 ```bash
 oos --version
