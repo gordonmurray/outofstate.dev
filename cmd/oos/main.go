@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/gordonmurray/outofstate.dev/internal/cost"
 	"github.com/gordonmurray/outofstate.dev/internal/discover"
 	"github.com/gordonmurray/outofstate.dev/internal/report"
 	"github.com/gordonmurray/outofstate.dev/internal/scan"
@@ -88,7 +89,7 @@ Exit codes:
 	f.DurationVar(&o.sourceTimeout, "source-timeout", 2*time.Minute, "deadline for each Terraform subprocess")
 	f.StringVar(&o.format, "format", "text", "report format: text or json")
 	f.StringVar(&o.output, "output", "", "write the report to this file instead of stdout")
-	f.BoolVar(&o.noCost, "no-cost", false, "skip Cost Explorer calls")
+	f.BoolVar(&o.noCost, "no-cost", false, "skip Cost Explorer (each request costs US$0.01; a run makes a few)")
 	f.BoolVar(&o.noColor, "no-color", false, "disable colour")
 	f.StringVar(&o.inventoryFile, "inventory-file", "", "read the AWS inventory from a JSON file instead of AWS (testing)")
 	_ = f.MarkHidden("inventory-file")
@@ -116,6 +117,7 @@ func scanCommand(o *options, stdout io.Writer, now func() time.Time) (int, error
 	// Discovery and state loading run at the same time.
 	var (
 		inv     *discover.Inventory
+		awsAPI  *discover.AWS
 		discErr error
 		sources []scan.LoadedSource
 		wg      sync.WaitGroup
@@ -123,7 +125,7 @@ func scanCommand(o *options, stdout io.Writer, now func() time.Time) (int, error
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		inv, discErr = discoverInventory(ctx, o)
+		inv, awsAPI, discErr = discoverInventory(ctx, o)
 	}()
 	go func() {
 		defer wg.Done()
@@ -141,10 +143,18 @@ func scanCommand(o *options, stdout io.Writer, now func() time.Time) (int, error
 		return scan.ExitFatal, errors.New("interrupted")
 	}
 
-	rep := scan.Run(scan.Input{Inventory: inv, Sources: sources, Version: version.Version, Time: now()})
-	if !o.noCost {
-		rep.Cost = &report.CostBlock{Available: false, Reason: "not implemented yet"}
+	// Cost needs the account ID, so it runs after discovery. It is optional:
+	// any failure is reported in the cost block, never as a scan failure.
+	var costs *cost.Result
+	if !o.noCost && awsAPI != nil {
+		costs = cost.Fetch(ctx, cost.NewClient(awsAPI.Config()), inv.Partition, inv.AccountID, inv.RegionNames(), now())
+		if ctx.Err() != nil {
+			// Ctrl-C during the cost calls is an interruption, not a cost error.
+			return scan.ExitFatal, errors.New("interrupted")
+		}
 	}
+
+	rep := scan.Run(scan.Input{Inventory: inv, Sources: sources, Cost: costs, Version: version.Version, Time: now()})
 
 	if err := write(o, stdout, rep); err != nil {
 		return scan.ExitFatal, err
@@ -152,19 +162,23 @@ func scanCommand(o *options, stdout io.Writer, now func() time.Time) (int, error
 	return scan.ExitCode(rep), nil
 }
 
-func discoverInventory(ctx context.Context, o *options) (*discover.Inventory, error) {
+// discoverInventory returns the inventory, and the AWS client when live
+// discovery was used (nil for --inventory-file, which also means no cost).
+func discoverInventory(ctx context.Context, o *options) (*discover.Inventory, *discover.AWS, error) {
 	if o.inventoryFile != "" {
-		return discover.LoadFile(o.inventoryFile)
+		inv, err := discover.LoadFile(o.inventoryFile)
+		return inv, nil, err
 	}
 	a, err := discover.NewAWS(ctx, o.profile)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	regions := dedupe(o.regions)
 	if len(regions) == 0 && a.DefaultRegion() != "" {
 		regions = []string{a.DefaultRegion()}
 	}
-	return a.Discover(ctx, regions)
+	inv, err := a.Discover(ctx, regions)
+	return inv, a, err
 }
 
 func write(o *options, stdout io.Writer, rep *report.Report) error {

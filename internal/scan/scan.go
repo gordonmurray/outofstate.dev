@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gordonmurray/outofstate.dev/internal/cost"
 	"github.com/gordonmurray/outofstate.dev/internal/discover"
 	"github.com/gordonmurray/outofstate.dev/internal/match"
 	"github.com/gordonmurray/outofstate.dev/internal/report"
@@ -137,8 +138,36 @@ func LoadStateFile(path string, now func() time.Time) LoadedSource {
 type Input struct {
 	Inventory *discover.Inventory
 	Sources   []LoadedSource
+	Cost      *cost.Result // nil when cost was not requested
 	Version   string
 	Time      time.Time
+}
+
+// CostScope says what the cost figures cover.
+const CostScope = "all RDS charges in the scanned account and regions (instances, storage, backups and other usage), not the cost of particular findings"
+
+func costBlock(c *cost.Result) *report.CostBlock {
+	if c == nil {
+		return nil
+	}
+	if !c.Available {
+		return &report.CostBlock{Available: false, Reason: string(c.Reason), Message: c.Reason.Message()}
+	}
+	b := &report.CostBlock{Available: true, Scope: CostScope, Metric: cost.Metric, Currency: c.Currency}
+	for _, p := range []struct {
+		name string
+		p    *cost.Period
+	}{{"last_6_months", c.Months}, {"last_30_days", c.Last30}} {
+		bd := map[string]string{}
+		for _, bucket := range cost.Buckets {
+			bd[string(bucket)] = cost.Decimal(p.p.Breakdown[bucket])
+		}
+		b.Periods = append(b.Periods, report.CostPeriod{
+			Name: p.name, Label: p.p.Label, Start: p.p.Start, End: p.p.End,
+			Total: cost.Decimal(p.p.Total), Estimated: p.p.Estimated, Breakdown: bd,
+		})
+	}
+	return b
 }
 
 // Run matches and builds the report.
@@ -166,6 +195,7 @@ func Run(in Input) *report.Report {
 		Sources:  []report.Source{},
 		Findings: []report.Finding{},
 		Warnings: warnings(res.Warnings),
+		Cost:     costBlock(in.Cost),
 	}
 	for _, reg := range in.Inventory.Regions {
 		r.Scan.Regions = append(r.Scan.Regions, reg.Region)

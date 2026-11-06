@@ -21,7 +21,7 @@ type Report struct {
 	Summary       Summary    `json:"summary"`
 	Findings      []Finding  `json:"findings"`
 	Warnings      []Warning  `json:"warnings"`
-	Cost          *CostBlock `json:"cost"` // nil until cost is implemented or when --no-cost
+	Cost          *CostBlock `json:"cost"` // nil when cost was not requested (--no-cost)
 }
 
 // Scan describes the run.
@@ -118,10 +118,27 @@ type Warning struct {
 	Addresses []string `json:"addresses,omitempty"`
 }
 
-// CostBlock is filled in by milestone M4.
+// CostBlock holds RDS spend for the scanned account and regions. It is the
+// total of all RDS charges there, not the cost of particular findings.
 type CostBlock struct {
-	Available bool   `json:"available"`
-	Reason    string `json:"reason,omitempty"`
+	Available bool         `json:"available"`
+	Reason    string       `json:"reason,omitempty"`  // fixed code when unavailable
+	Message   string       `json:"message,omitempty"` // fixed text for the reason
+	Scope     string       `json:"scope,omitempty"`
+	Metric    string       `json:"metric,omitempty"`
+	Currency  string       `json:"currency,omitempty"`
+	Periods   []CostPeriod `json:"periods,omitempty"`
+}
+
+// CostPeriod is one costed time range. Amounts are exact decimal strings.
+type CostPeriod struct {
+	Name      string            `json:"name"`  // last_6_months, last_30_days
+	Label     string            `json:"label"` // e.g. "May–Oct 2026"
+	Start     string            `json:"start"` // inclusive, YYYY-MM-DD
+	End       string            `json:"end"`   // exclusive, YYYY-MM-DD
+	Total     string            `json:"total"`
+	Estimated bool              `json:"estimated"`
+	Breakdown map[string]string `json:"breakdown"` // instances, multi_az, storage, backup, proxy, other
 }
 
 // WriteJSON writes the report as indented JSON.

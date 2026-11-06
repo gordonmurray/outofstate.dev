@@ -72,3 +72,37 @@ func TestColour(t *testing.T) {
 		t.Error("a raw escape from the data reached the terminal")
 	}
 }
+
+func TestCostLines(t *testing.T) {
+	base := func(c *CostBlock) string {
+		r := &Report{Scan: Scan{Time: time.Unix(0, 0), AccountID: "123456789012", Regions: []string{"us-west-2"}, Complete: true}, Cost: c}
+		var buf bytes.Buffer
+		if err := WriteText(&buf, r); err != nil {
+			t.Fatal(err)
+		}
+		return buf.String()
+	}
+	out := base(&CostBlock{Available: true, Currency: "USD", Periods: []CostPeriod{
+		{Name: "last_6_months", Label: "May–Oct 2026", Total: "2140.17"},
+		{Name: "last_30_days", Label: "7 Oct–5 Nov 2026", Total: "410.0249", Estimated: true,
+			Breakdown: map[string]string{"instances": "300", "multi_az": "89.51", "storage": "20.5149", "backup": "0", "proxy": "0", "other": "0.0001"}},
+	}})
+	for _, want := range []string{
+		"RDS charges in us-west-2 (amortised, USD): $2,140.17 May–Oct 2026 · $410.02 7 Oct–5 Nov 2026 (estimated)",
+		"last 30 days: instances $300.00 · Multi-AZ $89.51 · storage $20.51 · other $0.00",
+		"not the cost of the import candidates",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "backup") || strings.Contains(out, "proxy") {
+		t.Errorf("zero buckets should be hidden:\n%s", out)
+	}
+	if out := base(&CostBlock{Available: false, Reason: "access_denied", Message: "access denied (needs ce:GetCostAndUsage)"}); !strings.Contains(out, "RDS charges: unavailable (access denied (needs ce:GetCostAndUsage))") {
+		t.Errorf("unavailable:\n%s", out)
+	}
+	if out := base(nil); strings.Contains(out, "RDS charges") {
+		t.Errorf("no cost block should print nothing:\n%s", out)
+	}
+}
