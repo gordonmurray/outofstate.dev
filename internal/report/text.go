@@ -3,10 +3,13 @@ package report
 import (
 	"fmt"
 	"io"
+	"math/big"
 	"sort"
 	"strconv"
 	"strings"
 	"unicode"
+
+	"github.com/gordonmurray/outofstate.dev/internal/cost"
 )
 
 // TextOptions controls text rendering.
@@ -55,6 +58,7 @@ func WriteTextWith(w io.Writer, r *Report, o TextOptions) error {
 			p.f("  region  %s %s: %s\n", clean(reg.Region), p.c(red, "FAILED"), clean(reg.Error))
 		}
 	}
+	p.costLines(r.Cost, scope)
 	p.f("\n")
 
 	inScope := r.Summary.Tracked + r.Summary.NoMatch + r.Summary.UnableToVerify
@@ -161,6 +165,61 @@ func WriteTextWith(w io.Writer, r *Report, o TextOptions) error {
 		p.f("Import candidates need a configuration review and a terraform plan before applying.\n")
 	}
 	return p.err
+}
+
+// bucketNames are the display names for cost breakdown buckets, in order.
+var bucketNames = []struct{ key, name string }{
+	{"instances", "instances"}, {"multi_az", "Multi-AZ"}, {"storage", "storage"},
+	{"backup", "backup"}, {"proxy", "proxy"}, {"other", "other"},
+}
+
+func (p *printer) costLines(c *CostBlock, scope string) {
+	if c == nil {
+		return
+	}
+	if !c.Available {
+		p.f("RDS charges: unavailable (%s)\n", clean(c.Message))
+		return
+	}
+	var parts []string
+	var last30 *CostPeriod
+	for i := range c.Periods {
+		cp := &c.Periods[i]
+		s := money(cp.Total, c.Currency) + " " + cp.Label
+		if cp.Estimated {
+			s += " (estimated)"
+		}
+		parts = append(parts, s)
+		if cp.Name == "last_30_days" {
+			last30 = cp
+		}
+	}
+	p.f("RDS charges in %s (amortised, %s): %s\n", clean(scope), clean(c.Currency), strings.Join(parts, " · "))
+	if last30 != nil {
+		var items []string
+		for _, b := range bucketNames {
+			if v := last30.Breakdown[b.key]; v != "" && !isZero(v) {
+				items = append(items, b.name+" "+money(v, c.Currency))
+			}
+		}
+		if len(items) > 0 {
+			p.f("  last 30 days: %s\n", strings.Join(items, " · "))
+		}
+	}
+	p.f("  %s\n", p.c(dim, "All RDS charges in these regions, not the cost of the import candidates below."))
+}
+
+func money(decimal, currency string) string {
+	r, ok := new(big.Rat).SetString(decimal)
+	if !ok {
+		return clean(decimal)
+	}
+	return cost.Money(r, clean(currency))
+}
+
+func isZero(decimal string) bool {
+	r, ok := new(big.Rat).SetString(decimal)
+	return ok && r.Sign() == 0
 }
 
 type printer struct {

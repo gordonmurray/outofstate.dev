@@ -2,11 +2,11 @@
 
 Find what's running outside your Terraform.
 
-`oos` compares the resources in an AWS account with the Terraform states you supply and reports the ones that no state tracks. The first supported resource type is RDS DB instances. More will follow, along with cost.
+`oos` compares the resources in an AWS account with the Terraform states you supply, reports the ones that no state tracks, and shows what the account spends on that type of resource. The first supported resource type is RDS DB instances. More will follow.
 
 `oos` reads Terraform state format version 4 (Terraform 0.12 and later, and OpenTofu).
 
-> **Status:** early development. RDS DB instances only; cost is not reported yet.
+> **Status:** early development. RDS DB instances only.
 
 ## Quick start
 
@@ -71,6 +71,7 @@ A state file works too, with `--state-file terraform.tfstate` (repeatable).
 | `--source-timeout` | `2m` | Deadline for each Terraform command |
 | `--format` | `text` | `text` or `json` |
 | `--output` | stdout | Write the report to a file |
+| `--no-cost` | | Skip Cost Explorer |
 | `--no-color` | | Disable colour (also `NO_COLOR`) |
 
 ### What the report means
@@ -83,6 +84,17 @@ A state file works too, with `--state-file terraform.tfstate` (repeatable).
 | **Not covered** | Outside what `oos` checks so far: Aurora and Multi-AZ DB cluster members, DocumentDB, Neptune. |
 
 "No match found" means *not in the states you supplied*. The instance may be managed by another state, by CloudFormation (its tags are shown), or by hand.
+
+### Cost
+
+The report header shows RDS spend for the scanned account and regions from AWS Cost Explorer: the last six complete months and the last 30 days, amortised, with a breakdown by usage type (instances, Multi-AZ, storage, backup, proxy, other):
+
+```
+RDS charges in us-west-2 (amortised, USD): $1,794.24 May–Oct 2026 · $499.05 7 Oct–5 Nov 2026 (estimated)
+  last 30 days: instances $227.26 · Multi-AZ $193.03 · storage $56.20 · proxy $21.51 · other $1.05
+```
+
+These are **all** RDS charges in those regions, not the cost of the import candidates: AWS does not normally attribute RDS cost to individual instances. Each Cost Explorer request costs US$0.01 and a run makes a few; `--no-cost` skips them. If cost cannot be read (no permission, Cost Explorer not enabled), the report says why and everything else still works.
 
 ### Exit codes
 
@@ -106,7 +118,8 @@ A state file works too, with `--state-file terraform.tfstate` (repeatable).
       "Action": [
         "sts:GetCallerIdentity",
         "rds:DescribeDBInstances",
-        "rds:ListTagsForResource"
+        "rds:ListTagsForResource",
+        "ce:GetCostAndUsage"
       ],
       "Resource": "*"
     }
