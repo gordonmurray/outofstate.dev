@@ -24,7 +24,7 @@ oos --version
 If it is missing, offer to install it (Linux and macOS):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/gordonmurray/outofstate.dev/main/scripts/install.sh | bash
+curl -fsSL https://outofstate.dev/install.sh | bash
 ```
 
 It installs into `~/.local/bin`, which must be on `PATH`.

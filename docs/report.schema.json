@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/gordonmurray/outofstate.dev/docs/report.schema.json",
+  "$id": "https://outofstate.dev/schema/report.v1.json",
   "title": "Out of State report",
   "description": "JSON report written by 'oos --format json'. Compatibility rules for schema_version 1: new optional fields and new enum values may be added; consumers must ignore fields they do not know. Removing or renaming a field, or changing its type or meaning, requires a new schema_version.",
   "type": "object",

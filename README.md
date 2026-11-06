@@ -1,6 +1,6 @@
 # Out of State (`oos`)
 
-Find what's running outside your Terraform.
+Find what's running outside your Terraform. [outofstate.dev](https://outofstate.dev)
 
 `oos` compares the resources in an AWS account with the Terraform states you supply and reports the ones that no state tracks. Supported so far: RDS DB instances, Application/Network Load Balancers and S3 buckets. More will follow.
 
@@ -39,8 +39,10 @@ A database and a load balancer have no match in either state and need a look, th
 Install the latest release into `~/.local/bin`. Builds are available for Linux and macOS, on Intel/AMD and ARM (Apple Silicon):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/gordonmurray/outofstate.dev/main/scripts/install.sh | bash
+curl -fsSL https://outofstate.dev/install.sh | bash
 ```
+
+The script served from outofstate.dev is the same file as [`scripts/install.sh`](scripts/install.sh) in this repository, published by the website workflow. `https://raw.githubusercontent.com/gordonmurray/outofstate.dev/main/scripts/install.sh` works too.
 
 If you prefer to read the script first, download it, check it, then run it with `bash install.sh`. With the [GitHub CLI](https://cli.github.com/) logged in, the script downloads through `gh` instead of `curl` and also verifies the release's build provenance (see below).
 
