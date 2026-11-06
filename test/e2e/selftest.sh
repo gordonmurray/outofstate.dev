@@ -40,6 +40,9 @@ check '[ ! -s "$FAKE_CALLS" ]' "no command may run for a hostile RUN_ID"
 scenario "no confirmation, no AWS call" 2 E2E_CONFIRM=no
 check '[ ! -s "$FAKE_CALLS" ]' "no command may run without E2E_CONFIRM=yes"
 
+scenario "unwritable artifacts directory stops before any AWS call" 2 RUN_ID=r0 ARTIFACTS=/proc/oos-cannot-write-here
+check '[ ! -s "$FAKE_CALLS" ]' "no command may run when state cannot be kept"
+
 SEED='{"DBInstances":[{"DBInstanceIdentifier":"someone-elses-db","TagList":[]}]}' \
   scenario "non-empty region stops before creating or deleting anything" 1 RUN_ID=r1
 check '! grep -qE "delete-db-instance|terraform .* (apply|destroy)" "$FAKE_CALLS"' "preflight failure must not apply, destroy or delete"
@@ -47,6 +50,7 @@ check '[ "$(remaining)" = "someone-elses-db" ]' "the unrelated instance must rem
 
 scenario "apply B fails: both applies settle, everything is cleaned up, no PASS" 1 RUN_ID=r2 FAKE_APPLY_FAIL=project-b
 check '[ "$(remaining)" = "" ]' "no run instances may remain"
+check '[ ! -e "$ARTIFACTS/r2" ]' "working state is removed after a verified cleanup"
 check '! grep -q PASS "$sandbox/out"' "must not print PASS"
 
 # Destroy and delete both fail; unrelated instances appear after preflight.

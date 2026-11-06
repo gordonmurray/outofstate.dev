@@ -13,8 +13,11 @@
 #   - the run id is validated, and is never interpolated into a query;
 #   - both applies always finish before teardown, and INT/TERM are handled;
 #   - PASS is printed only if the test passed and cleanup verified that no
-#     instance from this run remains. If cleanup fails, the exit code is
-#     non-zero and Terraform state is copied to $ARTIFACTS for recovery.
+#     instance from this run remains;
+#   - Terraform works in $ARTIFACTS/<run id> (on the host) from the start, so
+#     its state survives anything. That directory is removed only after
+#     cleanup is verified; if cleanup fails, the exit code is 3 and the state
+#     stays there for recovery.
 #
 # Needs AWS_PROFILE and AWS_REGION. Paths can be overridden for the self-test.
 set -euo pipefail
@@ -38,8 +41,15 @@ if ! [[ "$run_id" =~ ^[a-z0-9]{1,20}$ ]]; then
 fi
 prefix="oos-e2e-${run_id}-"
 
-work="$(mktemp -d)"
-cp -r "$E2E_DIR/project-a" "$E2E_DIR/project-b" "$work/"
+work="$ARTIFACTS/$run_id"
+if [ -e "$work" ]; then
+  echo "${work} already exists; choose another RUN_ID or recover that run first" >&2
+  exit 2
+fi
+if ! mkdir -p "$work" || ! cp -r "$E2E_DIR/project-a" "$E2E_DIR/project-b" "$work/"; then
+  echo "cannot write Terraform working directories to ${work}" >&2
+  exit 2
+fi
 a="$work/project-a"
 b="$work/project-b"
 export TF_VAR_run_id="$run_id" TF_IN_AUTOMATION=1 TF_INPUT=0
@@ -102,16 +112,13 @@ cleanup() {
       echo "instances from this run still exist: ${left}" >&2
       cleanup_ok=0
     fi
-    if [ "$cleanup_ok" -ne 1 ]; then
-      mkdir -p "$ARTIFACTS/$run_id"
-      cp -r "$a" "$b" "$ARTIFACTS/$run_id/" 2>/dev/null
-      echo "CLEANUP FAILED. Terraform state saved to ${ARTIFACTS}/${run_id}. Delete instances starting with ${prefix} by hand." >&2
-    fi
   fi
-  rm -rf "$work"
   if [ "$cleanup_ok" -ne 1 ]; then
+    # The state was never copied anywhere: it is still in $work, on the host.
+    echo "CLEANUP FAILED. Terraform state kept in ${work}. Delete instances starting with ${prefix} by hand." >&2
     exit 3
   fi
+  rm -rf "$work"
   if [ "$status" -eq 0 ]; then
     echo "PASS"
   fi
