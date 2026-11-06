@@ -17,7 +17,7 @@
         "account_id": { "type": "string", "pattern": "^[0-9]{12}$" },
         "regions": { "type": "array", "items": { "type": "string" } },
         "complete": { "type": "boolean", "description": "state_complete AND discovery_complete" },
-        "state_complete": { "type": "boolean", "description": "every Terraform source loaded and parsed fully" },
+        "state_complete": { "type": "boolean", "description": "no Terraform source failed, and every snapshot used for matching parsed fully (older snapshots of the same state are ignored)" },
         "discovery_complete": { "type": "boolean", "description": "every region was scanned successfully" }
       }
     },
@@ -176,7 +176,7 @@
       "type": "object",
       "required": ["kind"],
       "properties": {
-        "kind": { "enum": ["multiple_owners", "multiple_addresses", "stale_state_entry", "duplicate_snapshot", "diverged_copies", "tags_unavailable"] },
+        "kind": { "enum": ["multiple_owners", "multiple_addresses", "stale_state_entry", "duplicate_snapshot", "diverged_copies", "tags_unavailable"], "description": "diverged_copies: several snapshots of one state (same lineage, different serial); only the first source listed, the newest, was used for matching" },
         "sources": { "type": "array", "items": { "type": "string" } },
         "addresses": { "type": "array", "items": { "type": "string" } }
       }

@@ -73,14 +73,14 @@ func WriteTextWith(w io.Writer, r *Report, o TextOptions) error {
 	if len(candidates) > 0 {
 		p.f("%s\n\n", p.c(bold, fmt.Sprintf("%d import candidate(s): RDS instances with no match in the supplied states", len(candidates))))
 		for _, f := range candidates {
-			p.f("  %s %-16s %-16s %-12s %s\n", p.c(grey, padName(clean(f.Identifier))), clean(f.Class), clean(f.Engine+" "+f.EngineVersion), clean(f.InstanceStatus), created(f))
+			p.f("  %s %s %-16s %-16s %-12s %s\n", p.c(grey, padName(clean(f.Identifier))), padRegion(clean(f.Region)), clean(f.Class), clean(f.Engine+" "+f.EngineVersion), clean(f.InstanceStatus), created(f))
 		}
 		p.f("\n")
 	}
 	if len(unverified) > 0 {
 		p.f("%s\n\n", p.c(yellow, fmt.Sprintf("%d unable to verify: no match, but a source could not be read fully", len(unverified))))
 		for _, f := range unverified {
-			p.f("  %s %-16s %-16s %-12s %s\n", p.c(yellow, padName(clean(f.Identifier))), clean(f.Class), clean(f.Engine+" "+f.EngineVersion), clean(f.InstanceStatus), created(f))
+			p.f("  %s %s %-16s %-16s %-12s %s\n", p.c(yellow, padName(clean(f.Identifier))), padRegion(clean(f.Region)), clean(f.Class), clean(f.Engine+" "+f.EngineVersion), clean(f.InstanceStatus), created(f))
 		}
 		p.f("\n")
 	}
@@ -88,9 +88,9 @@ func WriteTextWith(w io.Writer, r *Report, o TextOptions) error {
 		p.f("%s\n", p.c(green, fmt.Sprintf("%d tracked in state", len(tracked))))
 		for _, f := range tracked {
 			for i, m := range f.Matches {
-				name := padName(clean(f.Identifier))
+				name, region := padName(clean(f.Identifier)), padRegion(clean(f.Region))
 				if i > 0 {
-					name = padName("")
+					name, region = padName(""), padRegion("")
 				}
 				extra := " (" + m.MatchedOn
 				if m.Weak {
@@ -103,7 +103,7 @@ func WriteTextWith(w io.Writer, r *Report, o TextOptions) error {
 					extra += ", " + m.Lifecycle
 				}
 				extra += ")"
-				p.f("  %s %s (%s) %s%s\n", p.c(green, name), clean(m.Source), clean(m.Workspace), clean(m.Address), extra)
+				p.f("  %s %s %s (%s) %s%s\n", p.c(green, name), region, clean(m.Source), clean(m.Workspace), clean(m.Address), extra)
 			}
 		}
 		p.f("\n")
@@ -111,7 +111,7 @@ func WriteTextWith(w io.Writer, r *Report, o TextOptions) error {
 	if len(notCovered) > 0 {
 		p.f("%s\n", p.c(dim, fmt.Sprintf("%d not covered", len(notCovered))))
 		for _, f := range notCovered {
-			p.f("  %s %s\n", p.c(dim, padName(clean(f.Identifier))), p.c(dim, f.NotCoveredReason))
+			p.f("  %s %s %s\n", p.c(dim, padName(clean(f.Identifier))), padRegion(clean(f.Region)), p.c(dim, f.NotCoveredReason))
 		}
 		p.f("\n")
 	}
@@ -228,8 +228,14 @@ const nameWidth = 24
 
 // padName right-pads s to nameWidth runes (fmt's %-24s would count escape
 // codes added by colour).
-func padName(s string) string {
-	width := nameWidth
+func padName(s string) string { return pad(s, nameWidth) }
+
+// regionWidth fits every AWS region name (for example ap-southeast-3).
+const regionWidth = 15
+
+func padRegion(s string) string { return pad(s, regionWidth) }
+
+func pad(s string, width int) string {
 	n := len([]rune(s))
 	if n >= width {
 		return s
@@ -277,7 +283,11 @@ func describe(w Warning) string {
 	case "tags_unavailable":
 		return "tags could not be read (rds:ListTagsForResource)"
 	case "diverged_copies":
-		return "different versions of the same state were supplied: " + strings.Join(srcs, ", ")
+		if len(srcs) > 1 {
+			return "several versions of the same state were supplied; only the newest, " + srcs[0] +
+				", was used (ignored: " + strings.Join(srcs[1:], ", ") + ")"
+		}
+		return "several versions of the same state were supplied: " + strings.Join(srcs, ", ")
 	default:
 		return w.Kind
 	}

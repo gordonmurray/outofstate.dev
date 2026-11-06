@@ -426,3 +426,33 @@ func TestMissingAWSProfileIsFatal(t *testing.T) {
 		t.Errorf("no region: exit = %d, stderr = %q", code, stderr)
 	}
 }
+
+// Reproduces a reported bug: an older export of a state must not make an
+// instance look tracked after the current state dropped it.
+func TestOlderStateSnapshotCannotHideAGap(t *testing.T) {
+	inv := td("inventory_all_tracked.json") // only orders-db
+	older, newer := td("app.tfstate.json"), td("app-newer-dropped.tfstate.json")
+	for name, tc := range map[string]struct {
+		files []string
+		code  int
+	}{
+		"older only":        {[]string{older}, scan.ExitOK},
+		"newer only":        {[]string{newer}, scan.ExitNoMatch},
+		"both, older first": {[]string{older, newer}, scan.ExitNoMatch},
+		"both, newer first": {[]string{newer, older}, scan.ExitNoMatch},
+	} {
+		t.Run(name, func(t *testing.T) {
+			args := []string{"--inventory-file", inv}
+			for _, f := range tc.files {
+				args = append(args, "--state-file", f)
+			}
+			code, out, _ := oos(t, args...)
+			if code != tc.code {
+				t.Errorf("exit = %d, want %d\n%s", code, tc.code, out)
+			}
+			if len(tc.files) == 2 && !strings.Contains(out, "only the newest, "+newer+", was used (ignored: "+older+")") {
+				t.Errorf("missing explanation of which snapshot was used:\n%s", out)
+			}
+		})
+	}
+}

@@ -6,6 +6,30 @@ Find what's running outside your Terraform.
 
 `oos` reads Terraform state format version 4 (Terraform 0.12 and later, and OpenTofu).
 
+```
+$ oos --profile default --region eu-west-1 --source ./app-infra --source ./shared-infra
+Out of State · account 123456789012 · eu-west-1 · 2026-11-06 10:42 UTC
+Scan: complete
+  source  ./app-infra (default) ✓ 10:42:00
+  source  ./shared-infra (prod) ✓ 10:42:01
+
+1 import candidate(s): RDS instances with no match in the supplied states
+
+  analytics-db             eu-west-1       db.r6g.large     postgres 16.2    available    created 2025-03-02
+
+2 tracked in state
+  legacy-reports           eu-west-1       ./shared-infra (prod) aws_db_instance.legacy (resource_id)
+  orders-db                eu-west-1       ./app-infra (default) aws_db_instance.orders (resource_id)
+
+1 not covered
+  billing-cluster-1        eu-west-1       member of an Aurora or Multi-AZ DB cluster
+
+Import candidates need a configuration review and a terraform plan before applying.
+Use --format json for full details (ARNs, resource and import IDs, tags).
+```
+
+One database has no match in either state and needs a look, two are tracked (with the state and address that tracks them), and one is outside what `oos` checks so far.
+
 > **Status:** early development. RDS DB instances only.
 
 ## Quick start
@@ -89,6 +113,8 @@ A state file works too, with `--state-file terraform.tfstate` (repeatable).
 | **No match found** | No supplied state tracks it, and every state was read fully. These are **import candidates**: review the configuration and run `terraform plan` before importing. |
 | **Unable to verify** | No match, but a state could not be read fully, so the instance might be in it. |
 | **Not covered** | Outside what `oos` checks so far: Aurora and Multi-AZ DB cluster members, DocumentDB, Neptune. |
+
+If you supply several snapshots of the same state (for example a working directory and an older exported copy), only the newest is used, so an old copy cannot make something look tracked. The report says which one it used.
 
 "No match found" means *not in the states you supplied*. The instance may be managed by another state, by CloudFormation (its tags are in the `--format json` output), or by hand.
 

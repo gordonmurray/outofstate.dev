@@ -106,3 +106,37 @@ func TestCostLines(t *testing.T) {
 		t.Errorf("no cost block should print nothing:\n%s", out)
 	}
 }
+
+// Two instances with the same name in different regions must be
+// distinguishable in the text report.
+func TestRowsShowTheRegion(t *testing.T) {
+	r := &Report{
+		Scan: Scan{Time: time.Unix(0, 0), AccountID: "123456789012", Regions: []string{"eu-west-1", "us-east-1"}, Complete: true},
+		Findings: []Finding{
+			{Status: "no_match", Identifier: "orders-db", Region: "eu-west-1"},
+			{Status: "no_match", Identifier: "orders-db", Region: "us-east-1"},
+			{Status: "tracked", Identifier: "users-db", Region: "us-east-1", Matches: []Match{
+				{Source: "a", Workspace: "default", Address: "aws_db_instance.x", Lifecycle: "current", MatchedOn: "resource_id"},
+				{Source: "b", Workspace: "default", Address: "aws_db_instance.y", Lifecycle: "current", MatchedOn: "resource_id"}}},
+			{Status: "not_covered", Identifier: "aurora-1", Region: "eu-west-1", NotCoveredReason: "member of an Aurora or Multi-AZ DB cluster"},
+			{Status: "unable_to_verify", Identifier: "maybe-db", Region: "ap-southeast-3"},
+		},
+	}
+	var buf bytes.Buffer
+	if err := WriteText(&buf, r); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"  orders-db                eu-west-1       ",
+		"  orders-db                us-east-1       ",
+		"  users-db                 us-east-1       a (default) aws_db_instance.x",
+		"                                           b (default) aws_db_instance.y",
+		"  aurora-1                 eu-west-1       member of",
+		"  maybe-db                 ap-southeast-3  ",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+}
