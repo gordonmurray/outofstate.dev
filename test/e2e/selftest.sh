@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
+# check() evaluates its single-quoted first argument later, on purpose.
+# shellcheck disable=SC2016
 # Self-test for test/e2e/run.sh with fake aws and terraform commands. Checks
 # the safety rules without touching AWS. Run with: make e2e-selftest
 set -uo pipefail
-# check() evaluates its single-quoted first argument later, on purpose.
-# shellcheck disable=SC2016
 
 here="$(cd "$(dirname "$0")" && pwd)"
 failures=0
