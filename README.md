@@ -38,10 +38,13 @@ The script downloads the release into a fresh temporary directory, verifies its 
 Every release from v0.5.0 on is built by GitHub Actions from a tagged commit, and each archive carries a signed [build provenance attestation](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations). To check that an archive you downloaded was built by this repository's release workflow:
 
 ```bash
-gh attestation verify oos_0.5.0_darwin_arm64.tar.gz --repo gordonmurray/outofstate.dev
+gh attestation verify oos_0.5.0_darwin_arm64.tar.gz \
+  --repo gordonmurray/outofstate.dev \
+  --signer-workflow gordonmurray/outofstate.dev/.github/workflows/release.yml \
+  --source-ref refs/tags/v0.5.0
 ```
 
-The install script does this automatically when the GitHub CLI is logged in.
+The install script does this automatically when the GitHub CLI is logged in and recent enough (2.49 or later; older versions get a note, and the checksum is still verified).
 
 ## Usage
 
