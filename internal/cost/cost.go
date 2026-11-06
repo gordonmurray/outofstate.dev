@@ -1,4 +1,4 @@
-// Package cost reads RDS spend from AWS Cost Explorer (PLAN.md §7, §15).
+// Package cost reads RDS spend from AWS Cost Explorer.
 //
 // It reports totals for all RDS charges in the scanned account and regions,
 // broken down by usage type. It does not attribute cost to individual

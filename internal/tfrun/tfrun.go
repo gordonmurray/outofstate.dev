@@ -1,5 +1,5 @@
 // Package tfrun runs "terraform state pull" (or the OpenTofu equivalent) in
-// a working directory under a strict contract (PLAN.md §6):
+// a working directory under a strict contract:
 //
 //   - never init, refresh, plan or anything that writes;
 //   - stdin closed, TF_INPUT=0, TF_IN_AUTOMATION=1, so nothing can prompt;
