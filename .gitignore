@@ -1,0 +1,7 @@
+/dist/
+/oos
+*.tfstate
+*.tfstate.backup
+.terraform/
+outofstate.txt
+outofstate.json

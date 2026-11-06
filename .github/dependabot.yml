@@ -1,0 +1,22 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      aws-sdk:
+        patterns: ["github.com/aws/*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+
+  # tools/Dockerfile is the single source of truth for Go, golangci-lint,
+  # GoReleaser and Terraform versions. After a Go image bump, update the
+  # toolchain line in go.mod too: "make check-versions" fails CI until both agree.
+  - package-ecosystem: docker
+    directory: /tools
+    schedule:
+      interval: weekly
