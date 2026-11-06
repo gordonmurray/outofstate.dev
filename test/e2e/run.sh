@@ -42,11 +42,17 @@ fi
 prefix="oos-e2e-${run_id}-"
 
 work="$ARTIFACTS/$run_id"
-if [ -e "$work" ]; then
-  echo "${work} already exists; choose another RUN_ID or recover that run first" >&2
+# Claim the run directory atomically: plain mkdir fails if it already exists,
+# so two runs with the same id can never share (or delete) each other's state.
+if ! mkdir -p "$ARTIFACTS" 2>/dev/null; then
+  echo "cannot create ${ARTIFACTS}" >&2
   exit 2
 fi
-if ! mkdir -p "$work" || ! cp -r "$E2E_DIR/project-a" "$E2E_DIR/project-b" "$work/"; then
+if ! mkdir "$work" 2>/dev/null; then
+  echo "${work} already exists or cannot be created; choose another RUN_ID or recover that run first" >&2
+  exit 2
+fi
+if ! cp -r "$E2E_DIR/project-a" "$E2E_DIR/project-b" "$work/"; then
   echo "cannot write Terraform working directories to ${work}" >&2
   exit 2
 fi

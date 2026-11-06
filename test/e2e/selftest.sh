@@ -43,6 +43,10 @@ check '[ ! -s "$FAKE_CALLS" ]' "no command may run without E2E_CONFIRM=yes"
 scenario "unwritable artifacts directory stops before any AWS call" 2 RUN_ID=r0 ARTIFACTS=/proc/oos-cannot-write-here
 check '[ ! -s "$FAKE_CALLS" ]' "no command may run when state cannot be kept"
 
+mkdir -p "$sandbox/claimed/r6"
+scenario "an existing run directory is never reused" 2 RUN_ID=r6 ARTIFACTS="$sandbox/claimed"
+check '[ ! -s "$FAKE_CALLS" ]' "no command may run when the run directory exists"
+
 SEED='{"DBInstances":[{"DBInstanceIdentifier":"someone-elses-db","TagList":[]}]}' \
   scenario "non-empty region stops before creating or deleting anything" 1 RUN_ID=r1
 check '! grep -qE "delete-db-instance|terraform .* (apply|destroy)" "$FAKE_CALLS"' "preflight failure must not apply, destroy or delete"
