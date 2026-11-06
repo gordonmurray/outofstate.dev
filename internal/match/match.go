@@ -216,8 +216,7 @@ func matchInstance(inst discover.Instance, sources []keptSource, stateComplete b
 
 	for si, src := range sources {
 		for _, id := range src.State.Identities {
-			if id.Type != inst.TerraformType() ||
-				id.Partition != inst.Partition || id.AccountID != inst.AccountID || id.Region != inst.Region {
+			if id.Type != inst.TerraformType() || !inScope(inst, id) {
 				continue
 			}
 			key, weak, renamed, stale := compare(inst, id)
@@ -264,6 +263,20 @@ func matchInstance(inst discover.Instance, sources []keptSource, stateComplete b
 	return f
 }
 
+// inScope reports whether a state entry can describe the resource at all.
+// Most types take partition, account and region from the ARN and must agree
+// on all three. S3 bucket ARNs carry only the partition: the account and
+// region are compared when the state records them (see compare for region).
+func inScope(inst discover.Instance, id tfstate.Identity) bool {
+	if id.Partition != inst.Partition {
+		return false
+	}
+	if inst.TerraformType() == discover.TypeS3Bucket {
+		return id.AccountID == "" || id.AccountID == inst.AccountID
+	}
+	return id.AccountID == inst.AccountID && id.Region == inst.Region
+}
+
 // compare decides whether a state entry tracks a resource of the same type.
 //
 // Load balancers: the ARN is the identity (it ends in a generated suffix, so
@@ -275,6 +288,23 @@ func matchInstance(inst discover.Instance, sources []keptSource, stateComplete b
 // name. Fallback is allowed only when the state entry has no resource ID:
 // an exact ARN, then the identifier within the same scope, is a weaker match.
 func compare(inst discover.Instance, id tfstate.Identity) (key Key, weak, renamed, stale bool) {
+	if inst.TerraformType() == discover.TypeS3Bucket {
+		// Bucket names are unique within a partition, so the ARN identifies
+		// the bucket by name. If the state recorded a different region, the
+		// bucket was deleted and recreated elsewhere: a stale entry. Without
+		// a recorded region the match is weaker (a missing account is common
+		// in older state and does not weaken it: ListBuckets only returns the
+		// scanned account's buckets). Buckets have no immutable
+		// ID, so a bucket recreated under the same name in the same region
+		// cannot be told apart.
+		if inst.ARN == "" || inst.ARN != id.ARN {
+			return "", false, false, false
+		}
+		if id.Region != "" && id.Region != inst.Region {
+			return "", false, false, true
+		}
+		return KeyARN, id.Region == "", false, false
+	}
 	if inst.TerraformType() == discover.TypeLoadBalancer {
 		if inst.ARN != "" && inst.ARN == id.ARN {
 			return KeyARN, false, false, false

@@ -247,6 +247,8 @@ func columns(f Finding) (string, string) {
 	switch f.ResourceType {
 	case "aws_lb":
 		return clean(f.Details["scheme"]), clean(f.Details["vpc_id"])
+	case "aws_s3_bucket":
+		return "", ""
 	default:
 		return clean(f.Class), clean(f.Engine + " " + f.EngineVersion)
 	}
@@ -256,6 +258,8 @@ func typeLabel(resourceType string) string {
 	switch resourceType {
 	case "aws_lb":
 		return "load balancers"
+	case "aws_s3_bucket":
+		return "S3 buckets"
 	case "", "aws_db_instance":
 		return "RDS DB instances"
 	}
@@ -270,6 +274,8 @@ func toolLabel(tool string) string {
 		return "Elastic Beanstalk"
 	case "kubernetes":
 		return "Kubernetes (AWS Load Balancer Controller)"
+	case "cdk":
+		return "CDK (bootstrap)"
 	}
 	return clean(tool)
 }
@@ -320,7 +326,9 @@ func describe(w Warning) string {
 	case "duplicate_snapshot":
 		return "the same state snapshot was supplied more than once: " + strings.Join(srcs, ", ") + " (counted once)"
 	case "managed_by_other_tool":
-		return "its tags suggest it is managed by " + toolLabel(w.Tool) + ", not Terraform; check there before importing"
+		return "its tags suggest it is managed by " + toolLabel(w.Tool) + "; check there before importing"
+	case "likely_created_by":
+		return "its name suggests it was created by " + toolLabel(w.Tool) + "; check before importing"
 	case "tags_unavailable":
 		return "tags could not be read (check the tag-reading permissions in the README)"
 	case "diverged_copies":

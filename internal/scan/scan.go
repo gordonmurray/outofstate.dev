@@ -312,8 +312,13 @@ func finding(f match.Finding) report.Finding {
 		rf.Warnings = append(rf.Warnings, report.Warning{Kind: "tags_unavailable"})
 	}
 	// A hint, not a verdict: the tags suggest another tool manages it.
-	if in.ManagedBy != "" && (f.Status == match.StatusNoMatch || f.Status == match.StatusUnverified) {
-		rf.Warnings = append(rf.Warnings, report.Warning{Kind: "managed_by_other_tool", Tool: in.ManagedBy})
+	if f.Status == match.StatusNoMatch || f.Status == match.StatusUnverified {
+		switch {
+		case in.ManagedBy != "":
+			rf.Warnings = append(rf.Warnings, report.Warning{Kind: "managed_by_other_tool", Tool: in.ManagedBy})
+		case in.LikelyCreatedBy != "":
+			rf.Warnings = append(rf.Warnings, report.Warning{Kind: "likely_created_by", Tool: in.LikelyCreatedBy})
+		}
 	}
 	if !in.Created.IsZero() {
 		c := in.Created.UTC()

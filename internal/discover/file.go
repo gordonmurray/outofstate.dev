@@ -175,8 +175,11 @@ func LoadFile(path string) (*Inventory, error) {
 					typ = TypeDBInstance
 				}
 				kind := KindRDS
-				if typ == TypeLoadBalancer {
+				switch typ {
+				case TypeLoadBalancer:
 					kind = LBKind(i.LBType)
+				case TypeS3Bucket:
+					kind = KindS3
 				}
 				inst := Instance{
 					Type: typ, Kind: kind, Scheme: i.Scheme, VPCID: i.VPCID,

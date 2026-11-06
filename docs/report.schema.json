@@ -127,8 +127,8 @@
       "type": "object",
       "required": ["resource_type", "status", "partition", "account_id", "region", "arn", "identifier", "resource_id", "import_id", "engine", "engine_version", "class", "instance_status", "tags", "matches", "warnings"],
       "properties": {
-        "resource_type": { "type": "string", "description": "Terraform resource type: aws_db_instance or aws_lb" },
-        "kind": { "type": "string", "description": "short label: rds, alb, nlb, gwlb" },
+        "resource_type": { "type": "string", "description": "Terraform resource type: aws_db_instance, aws_lb or aws_s3_bucket" },
+        "kind": { "type": "string", "description": "short label: rds, alb, nlb, gwlb, s3" },
         "details": { "type": "object", "additionalProperties": { "type": "string" }, "description": "type-specific details, e.g. scheme and vpc_id for load balancers" },
         "status": { "enum": ["tracked", "no_match", "unable_to_verify", "not_covered"] },
         "not_covered_reason": { "type": "string" },
@@ -157,7 +157,7 @@
               "lifecycle": { "enum": ["current", "tainted", "deposed"] },
               "deposed_key": { "type": "string" },
               "matched_on": { "enum": ["resource_id", "arn", "identifier"] },
-              "weak": { "type": "boolean", "description": "true when the match did not use the resource type's immutable identity (resource_id for RDS, the ARN for load balancers)" },
+              "weak": { "type": "boolean", "description": "true when the match could not use the resource type's strongest identity (resource_id for RDS, the ARN for load balancers, bucket name plus recorded region for S3)" },
               "renamed": { "type": "boolean" }
             }
           }
@@ -180,8 +180,8 @@
       "type": "object",
       "required": ["kind"],
       "properties": {
-        "kind": { "enum": ["multiple_owners", "multiple_addresses", "stale_state_entry", "duplicate_snapshot", "diverged_copies", "tags_unavailable", "managed_by_other_tool"], "description": "diverged_copies: several snapshots of one state (same lineage, different serial); only the first source listed, the newest, was used for matching" },
-        "tool": { "type": "string", "description": "managed_by_other_tool: cloudformation, elastic_beanstalk or kubernetes, inferred from tags" },
+        "kind": { "enum": ["multiple_owners", "multiple_addresses", "stale_state_entry", "duplicate_snapshot", "diverged_copies", "tags_unavailable", "managed_by_other_tool", "likely_created_by"], "description": "diverged_copies: several snapshots of one state (same lineage, different serial); only the first source listed, the newest, was used for matching" },
+        "tool": { "type": "string", "description": "managed_by_other_tool (from tags): cloudformation, elastic_beanstalk or kubernetes; likely_created_by (from an S3 bucket name convention): cdk, cloudformation or elastic_beanstalk" },
         "sources": { "type": "array", "items": { "type": "string" } },
         "addresses": { "type": "array", "items": { "type": "string" } }
       }

@@ -1,0 +1,61 @@
+{
+  "version": 4,
+  "terraform_version": "1.17.1",
+  "serial": 1,
+  "lineage": "storage-lineage",
+  "outputs": {},
+  "resources": [
+    {
+      "mode": "managed",
+      "type": "aws_s3_bucket",
+      "name": "logs",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "arn": "arn:aws:s3:::acme-logs",
+            "bucket": "acme-logs",
+            "id": "acme-logs",
+            "region": "eu-west-1",
+            "policy": "OOS-SECRET-MARKER"
+          }
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_s3_bucket",
+      "name": "legacy",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "arn": "arn:aws:s3:::acme-legacy",
+            "bucket": "acme-legacy",
+            "id": "acme-legacy",
+            "region": "us-east-1",
+            "policy": "OOS-SECRET-MARKER"
+          }
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_s3_bucket_policy",
+      "name": "exports",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "bucket": "acme-exports",
+            "id": "acme-exports",
+            "policy": "OOS-SECRET-MARKER"
+          }
+        }
+      ]
+    }
+  ]
+}

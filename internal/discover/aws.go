@@ -12,8 +12,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	elbv2 "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
 	"github.com/aws/aws-sdk-go-v2/service/rds"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/smithy-go"
+	"github.com/aws/smithy-go/logging"
 )
 
 // Errors that stop a scan before any report can be produced.
@@ -50,6 +52,11 @@ type rdsAPI interface {
 	ListTagsForResource(context.Context, *rds.ListTagsForResourceInput, ...func(*rds.Options)) (*rds.ListTagsForResourceOutput, error)
 }
 
+type s3API interface {
+	s3.ListBucketsAPIClient
+	GetBucketTagging(context.Context, *s3.GetBucketTaggingInput, ...func(*s3.Options)) (*s3.GetBucketTaggingOutput, error)
+}
+
 type elbAPI interface {
 	elbv2.DescribeLoadBalancersAPIClient
 	DescribeTags(context.Context, *elbv2.DescribeTagsInput, ...func(*elbv2.Options)) (*elbv2.DescribeTagsOutput, error)
@@ -64,6 +71,8 @@ type AWS struct {
 	newSTS          func(aws.Config) stsAPI
 	newRDS          func(aws.Config, string) rdsAPI
 	newELB          func(aws.Config, string) elbAPI
+	newS3           func(aws.Config, string) s3API
+	newS3PathStyle  func(aws.Config, string) s3API
 	regionTimeout   time.Duration
 	identityTimeout time.Duration
 	maxConcurrent   int
@@ -72,7 +81,9 @@ type AWS struct {
 // NewAWS loads the shared AWS configuration (environment, ~/.aws/config,
 // SSO profiles) for the given profile, or the default chain when empty.
 func NewAWS(ctx context.Context, profile string) (*AWS, error) {
-	var opts []func(*config.LoadOptions) error
+	// The SDK's own log lines (for example about abandoned retries) are not
+	// for oos users, and can include network details: silence them.
+	opts := []func(*config.LoadOptions) error{config.WithLogger(logging.Nop{})}
 	if profile != "" {
 		opts = append(opts, config.WithSharedConfigProfile(profile))
 	}
@@ -96,6 +107,14 @@ func newAWS(cfg aws.Config) *AWS {
 		},
 		newELB: func(c aws.Config, region string) elbAPI {
 			return elbv2.NewFromConfig(c, func(o *elbv2.Options) { o.Region = region })
+		},
+		// ListBuckets with BucketRegion must be sent to that region's
+		// endpoint, and GetBucketTagging to the bucket's region.
+		newS3: func(c aws.Config, region string) s3API {
+			return s3.NewFromConfig(c, func(o *s3.Options) { o.Region = region })
+		},
+		newS3PathStyle: func(c aws.Config, region string) s3API {
+			return s3.NewFromConfig(c, func(o *s3.Options) { o.Region = region; o.UsePathStyle = true })
 		},
 		regionTimeout:   2 * time.Minute,
 		identityTimeout: 30 * time.Second,
@@ -153,6 +172,8 @@ func (a *AWS) Discover(ctx context.Context, regions []string, types ...string) (
 				switch typ {
 				case TypeLoadBalancer:
 					rr = a.regionLB(ctx, partition, account, region)
+				case TypeS3Bucket:
+					rr = a.regionS3(ctx, partition, account, region)
 				default:
 					rr = a.region(ctx, partition, account, region)
 				}
@@ -295,6 +316,130 @@ func (a *AWS) regionLB(ctx context.Context, partition, account, region string) R
 		Classify(&lbs[i])
 	}
 	return RegionResult{Region: region, Instances: lbs}
+}
+
+// tagWorkers bounds the GetBucketTagging calls in flight per region.
+var tagWorkers = 32
+
+// tagAttemptTimeout bounds one GetBucketTagging attempt. Each bucket has its
+// own hostname, so each call needs a DNS lookup; a single dropped DNS packet
+// otherwise stalls that call (and the whole scan) for the resolver's retry
+// interval, typically 5 seconds. A short deadline and one retry, which does a
+// fresh lookup, avoids that.
+var tagAttemptTimeout = 1500 * time.Millisecond
+
+// tagAttempts is how many times a timed-out tag request is tried with each
+// addressing style (path-style, then virtual-hosted), so a stuck bucket costs
+// at most about 4 x tagAttemptTimeout.
+var tagAttempts = 2
+
+// regionS3 lists the general purpose buckets in one region. ListBuckets
+// returns only buckets the calling account owns; BucketRegion limits it to
+// the scanned region. Directory and table buckets are not returned.
+func (a *AWS) regionS3(ctx context.Context, partition, account, region string) RegionResult {
+	ctx, cancel := context.WithTimeout(ctx, a.regionTimeout)
+	defer cancel()
+
+	client := a.newS3(a.cfg, region)
+	p := s3.NewListBucketsPaginator(client, &s3.ListBucketsInput{BucketRegion: aws.String(region)})
+	var buckets []Instance
+	for p.HasMorePages() {
+		page, err := p.NextPage(ctx)
+		if err != nil {
+			return RegionResult{Region: region, Failed: true, Error: categorise(ctx, err, false)}
+		}
+		for _, b := range page.Buckets {
+			name := aws.ToString(b.Name)
+			bucketRegion := aws.ToString(b.BucketRegion)
+			if bucketRegion == "" {
+				bucketRegion = region
+			}
+			if bucketRegion != region {
+				continue // defensive: the filter should already exclude it
+			}
+			buckets = append(buckets, Instance{
+				Type:       TypeS3Bucket,
+				Kind:       KindS3,
+				Partition:  partition,
+				AccountID:  account,
+				Region:     bucketRegion,
+				ARN:        "arn:" + partition + ":s3:::" + name,
+				Identifier: name,
+				Created:    aws.ToTime(b.CreationDate),
+			})
+		}
+	}
+
+	// Path-style tag requests all go to the regional endpoint, so they reuse
+	// connections instead of resolving and connecting to one hostname per
+	// bucket. If a bucket refuses path-style, the virtual-hosted client is
+	// used for it.
+	pathClient := a.newS3PathStyle(a.cfg, region)
+
+	// Tags: one call per bucket, tagWorkers at a time. NoSuchTagSet means no
+	// tags; any other failure is a warning on that bucket. Once the scan is
+	// cancelled or times out, no new bucket is started.
+	work := make(chan int)
+	var wg sync.WaitGroup
+	for w := 0; w < min(tagWorkers, len(buckets)); w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range work {
+				if ctx.Err() != nil {
+					buckets[i].TagsUnavailable = true
+					continue
+				}
+				out, err := bucketTags(ctx, pathClient, buckets[i].Identifier)
+				if err != nil && !isNoSuchTagSet(err) && ctx.Err() == nil {
+					out, err = bucketTags(ctx, client, buckets[i].Identifier)
+				}
+				if err != nil {
+					if !isNoSuchTagSet(err) {
+						buckets[i].TagsUnavailable = true
+					}
+					continue
+				}
+				if len(out.TagSet) > 0 {
+					buckets[i].Tags = make(map[string]string, len(out.TagSet))
+					for _, t := range out.TagSet {
+						buckets[i].Tags[aws.ToString(t.Key)] = aws.ToString(t.Value)
+					}
+				}
+			}
+		}()
+	}
+	for i := range buckets {
+		work <- i
+	}
+	close(work)
+	wg.Wait()
+	for i := range buckets {
+		Classify(&buckets[i])
+	}
+	return RegionResult{Region: region, Instances: buckets}
+}
+
+func isNoSuchTagSet(err error) bool {
+	var apiErr smithy.APIError
+	return errors.As(err, &apiErr) && apiErr.ErrorCode() == "NoSuchTagSet"
+}
+
+// bucketTags reads a bucket's tags, with a short deadline per attempt and
+// one retry when the first attempt times out.
+func bucketTags(ctx context.Context, client s3API, bucket string) (*s3.GetBucketTaggingOutput, error) {
+	var out *s3.GetBucketTaggingOutput
+	var err error
+	for attempt := 0; attempt < tagAttempts; attempt++ {
+		actx, cancel := context.WithTimeout(ctx, tagAttemptTimeout)
+		out, err = client.GetBucketTagging(actx, &s3.GetBucketTaggingInput{Bucket: aws.String(bucket)})
+		timedOut := errors.Is(actx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
+		cancel()
+		if err == nil || !timedOut {
+			return out, err
+		}
+	}
+	return out, err
 }
 
 // categorise maps an SDK error to a fixed category. The error text itself is

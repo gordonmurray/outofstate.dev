@@ -1,0 +1,150 @@
+{
+  "partition": "aws",
+  "account_id": "123456789012",
+  "regions": [
+    {
+      "region": "eu-west-1",
+      "instances": [
+        {
+          "arn": "arn:aws:rds:eu-west-1:123456789012:db:orders-db",
+          "identifier": "orders-db",
+          "resource_id": "db-ORDERS",
+          "engine": "postgres",
+          "engine_version": "16.4",
+          "class": "db.t4g.micro",
+          "status": "available",
+          "tags": {
+            "team": "data"
+          },
+          "created": "2025-03-02T10:00:00Z"
+        },
+        {
+          "arn": "arn:aws:rds:eu-west-1:123456789012:db:analytics-db",
+          "identifier": "analytics-db",
+          "resource_id": "db-ANALYTICS",
+          "engine": "postgres",
+          "engine_version": "16.2",
+          "class": "db.r6g.large",
+          "status": "available",
+          "tags": {
+            "team": "data"
+          },
+          "created": "2025-03-02T10:00:00Z"
+        },
+        {
+          "arn": "arn:aws:rds:eu-west-1:123456789012:db:legacy-reports",
+          "identifier": "legacy-reports",
+          "resource_id": "db-LEGACY",
+          "engine": "mysql",
+          "engine_version": "8.0.39",
+          "class": "db.t4g.micro",
+          "status": "stopped",
+          "tags": {},
+          "created": "2025-03-02T10:00:00Z"
+        },
+        {
+          "arn": "arn:aws:rds:eu-west-1:123456789012:db:billing-cluster-1",
+          "identifier": "billing-cluster-1",
+          "resource_id": "db-AURORA",
+          "engine": "aurora-postgresql",
+          "engine_version": "16.4",
+          "class": "db.t4g.micro",
+          "status": "available",
+          "tags": {
+            "team": "data"
+          },
+          "created": "2025-03-02T10:00:00Z",
+          "cluster_id": "billing"
+        }
+      ]
+    },
+    {
+      "region": "eu-west-1",
+      "type": "aws_lb",
+      "instances": [
+        {
+          "type": "aws_lb",
+          "lb_type": "application",
+          "arn": "arn:aws:elasticloadbalancing:eu-west-1:123456789012:loadbalancer/app/web-alb/0000000000000001",
+          "identifier": "web-alb",
+          "scheme": "internet-facing",
+          "vpc_id": "vpc-1",
+          "status": "active",
+          "tags": {
+            "team": "web"
+          },
+          "created": "2025-04-01T09:00:00Z"
+        },
+        {
+          "type": "aws_lb",
+          "lb_type": "application",
+          "arn": "arn:aws:elasticloadbalancing:eu-west-1:123456789012:loadbalancer/app/legacy-alb/0000000000000002",
+          "identifier": "legacy-alb",
+          "scheme": "internal",
+          "vpc_id": "vpc-1",
+          "status": "active",
+          "tags": {},
+          "created": "2024-01-01T09:00:00Z"
+        },
+        {
+          "type": "aws_lb",
+          "lb_type": "network",
+          "arn": "arn:aws:elasticloadbalancing:eu-west-1:123456789012:loadbalancer/net/k8s-ingress/0000000000000003",
+          "identifier": "k8s-ingress",
+          "scheme": "internet-facing",
+          "vpc_id": "vpc-2",
+          "status": "active",
+          "tags": {
+            "elbv2.k8s.aws/cluster": "prod"
+          },
+          "created": "2025-06-01T09:00:00Z"
+        },
+        {
+          "type": "aws_lb",
+          "lb_type": "gateway",
+          "arn": "arn:aws:elasticloadbalancing:eu-west-1:123456789012:loadbalancer/gwy/inspection/0000000000000004",
+          "identifier": "inspection",
+          "scheme": "internal",
+          "vpc_id": "vpc-3",
+          "status": "active",
+          "tags": {},
+          "created": "2025-07-01T09:00:00Z"
+        }
+      ]
+    },
+    {
+      "region": "eu-west-1",
+      "type": "aws_s3_bucket",
+      "instances": [
+        {
+          "type": "aws_s3_bucket",
+          "arn": "arn:aws:s3:::acme-logs",
+          "identifier": "acme-logs",
+          "tags": {},
+          "created": "2024-05-01T08:00:00Z"
+        },
+        {
+          "type": "aws_s3_bucket",
+          "arn": "arn:aws:s3:::acme-exports",
+          "identifier": "acme-exports",
+          "tags": {},
+          "created": "2024-05-01T08:00:00Z"
+        },
+        {
+          "type": "aws_s3_bucket",
+          "arn": "arn:aws:s3:::cdk-hnb659fds-assets-123456789012-eu-west-1",
+          "identifier": "cdk-hnb659fds-assets-123456789012-eu-west-1",
+          "tags": {},
+          "created": "2024-05-01T08:00:00Z"
+        },
+        {
+          "type": "aws_s3_bucket",
+          "arn": "arn:aws:s3:::acme-legacy",
+          "identifier": "acme-legacy",
+          "tags": {},
+          "created": "2024-05-01T08:00:00Z"
+        }
+      ]
+    }
+  ]
+}

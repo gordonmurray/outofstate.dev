@@ -1,8 +1,9 @@
-// Package discover lists AWS resources: RDS DB instances and Elastic Load
-// Balancing v2 load balancers.
+// Package discover lists AWS resources: RDS DB instances, Elastic Load
+// Balancing v2 load balancers and S3 general purpose buckets.
 package discover
 
 import (
+	"regexp"
 	"strings"
 	"time"
 )
@@ -12,6 +13,7 @@ import (
 const (
 	TypeDBInstance   = "aws_db_instance"
 	TypeLoadBalancer = "aws_lb" // also written as aws_alb in older code
+	TypeS3Bucket     = "aws_s3_bucket"
 )
 
 // Kinds are short labels for reports.
@@ -20,6 +22,7 @@ const (
 	KindALB  = "alb"
 	KindNLB  = "nlb"
 	KindGWLB = "gwlb"
+	KindS3   = "s3"
 )
 
 // Instance is one discovered AWS resource. The name is historical: it holds
@@ -60,6 +63,10 @@ type Instance struct {
 	// resource (cloudformation, elastic_beanstalk, kubernetes). Set by
 	// Classify. It is a hint for the report, not proof.
 	ManagedBy string
+	// LikelyCreatedBy names a tool whose naming convention the resource
+	// follows (for S3: cdk, cloudformation, elastic_beanstalk). Weaker than
+	// ManagedBy: a name says nothing about who manages it now.
+	LikelyCreatedBy string
 }
 
 // TerraformType returns Type, defaulting to aws_db_instance.
@@ -83,6 +90,7 @@ const (
 	ManagedByCloudFormation   = "cloudformation"
 	ManagedByElasticBeanstalk = "elastic_beanstalk"
 	ManagedByKubernetes       = "kubernetes"
+	ManagedByCDK              = "cdk"
 )
 
 // Classify sets NotCovered and ManagedBy. Ordinary Multi-AZ DB instances
@@ -106,8 +114,32 @@ func Classify(inst *Instance) {
 		if inst.Kind == KindGWLB {
 			inst.NotCovered = NotCoveredGatewayLB
 		}
+	case TypeS3Bucket:
+		inst.Kind = KindS3
 	}
 	inst.ManagedBy = managedBy(inst.Tags)
+	inst.LikelyCreatedBy = ""
+	if inst.ManagedBy == "" && inst.TerraformType() == TypeS3Bucket {
+		inst.LikelyCreatedBy = bucketCreatedBy(inst.Identifier)
+	}
+}
+
+// cdkAssetsBucketRE matches CDK bootstrap asset buckets, for example
+// cdk-hnb659fds-assets-123456789012-eu-west-1.
+var cdkAssetsBucketRE = regexp.MustCompile(`^cdk-[a-z0-9]+-assets-[0-9]{12}-[a-z0-9-]+$`)
+
+// bucketCreatedBy recognises buckets that tools create with well-known
+// names. It is a hint for the report, not proof.
+func bucketCreatedBy(name string) string {
+	switch {
+	case cdkAssetsBucketRE.MatchString(name):
+		return ManagedByCDK
+	case strings.HasPrefix(name, "cf-templates-"):
+		return ManagedByCloudFormation
+	case strings.HasPrefix(name, "elasticbeanstalk-"):
+		return ManagedByElasticBeanstalk
+	}
+	return ""
 }
 
 // managedBy infers another managing tool from well-known tags. Kubernetes

@@ -88,3 +88,30 @@ func ParseLBARN(s string) (LBARN, bool) {
 	}
 	return a, true
 }
+
+// S3BucketARN is a parsed S3 bucket ARN: arn:<partition>:s3:::<bucket>.
+type S3BucketARN struct {
+	Partition string
+	Bucket    string
+}
+
+// Bucket names. Current rules are 3-63 lowercase letters, digits, dots and
+// hyphens, but buckets created in us-east-1 before March 2018 can also use
+// uppercase letters and underscores and be up to 255 characters long. Accept
+// both: the point here is to reject things that are not bucket ARNs at all
+// (objects, access points), not to enforce today's naming rules.
+var bucketNameRE = regexp.MustCompile(`^[A-Za-z0-9._-]{3,255}$`)
+
+// ParseS3BucketARN accepts only bucket ARNs. Object ARNs (with a "/"),
+// access points and directory buckets are rejected.
+func ParseS3BucketARN(s string) (S3BucketARN, bool) {
+	parts := strings.Split(s, ":")
+	if len(parts) != 6 || parts[0] != "arn" || parts[2] != "s3" || parts[3] != "" || parts[4] != "" {
+		return S3BucketARN{}, false
+	}
+	a := S3BucketARN{Partition: parts[1], Bucket: parts[5]}
+	if !partitionRE.MatchString(a.Partition) || !bucketNameRE.MatchString(a.Bucket) {
+		return S3BucketARN{}, false
+	}
+	return a, true
+}
