@@ -20,16 +20,19 @@ const account = "123456789012"
 // fakeAWS serves STS GetCallerIdentity and RDS DescribeDBInstances (query
 // protocol, XML) for the real SDK clients.
 type fakeAWS struct {
-	mu       sync.Mutex
-	pages    map[string][]string // region -> pages of <DBInstance> XML
-	failPage map[string]int      // region -> page index that returns failCode
-	failCode string
-	stsCode  string
-	calls    map[string]int
-	slow     time.Duration
-	failTags bool
-	inflight int
-	maxSeen  int
+	mu         sync.Mutex
+	pages      map[string][]string // region -> pages of <DBInstance> XML
+	failPage   map[string]int      // region -> page index that returns failCode
+	failCode   string
+	stsCode    string
+	calls      map[string]int
+	slow       time.Duration
+	failTags   bool
+	lbPages    map[string][]string          // region -> pages of <member> XML
+	lbTags     map[string]map[string]string // ARN -> tags
+	tagBatches []int                        // ARNs per DescribeTags call
+	inflight   int
+	maxSeen    int
 }
 
 func (f *fakeAWS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -78,6 +81,48 @@ func (f *fakeAWS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		_, _ = fmt.Fprintf(w, `<DescribeDBInstancesResponse xmlns="http://rds.amazonaws.com/doc/2014-10-31/"><DescribeDBInstancesResult>
 <DBInstances>%s</DBInstances>%s</DescribeDBInstancesResult><ResponseMetadata><RequestId>1</RequestId></ResponseMetadata></DescribeDBInstancesResponse>`, body, marker)
+	case "DescribeLoadBalancers":
+		page := 0
+		if m := r.Form.Get("Marker"); m != "" {
+			_, _ = fmt.Sscanf(m, "page-%d", &page)
+		}
+		if fp, ok := f.failPage["lb/"+region]; ok && fp == page {
+			writeError(w, f.failCode)
+			return
+		}
+		pages := f.lbPages[region]
+		body := ""
+		if page < len(pages) {
+			body = pages[page]
+		}
+		marker := ""
+		if page+1 < len(pages) {
+			marker = fmt.Sprintf("<NextMarker>page-%d</NextMarker>", page+1)
+		}
+		_, _ = fmt.Fprintf(w, `<DescribeLoadBalancersResponse xmlns="http://elasticloadbalancing.amazonaws.com/doc/2015-12-01/"><DescribeLoadBalancersResult>
+<LoadBalancers>%s</LoadBalancers>%s</DescribeLoadBalancersResult><ResponseMetadata><RequestId>1</RequestId></ResponseMetadata></DescribeLoadBalancersResponse>`, body, marker)
+	case "DescribeTags":
+		f.mu.Lock()
+		f.tagBatches = append(f.tagBatches, countMembers(r.Form, "ResourceArns.member."))
+		f.mu.Unlock()
+		if f.failTags {
+			writeError(w, "AccessDenied")
+			return
+		}
+		var descs strings.Builder
+		for i := 1; ; i++ {
+			arn := r.Form.Get(fmt.Sprintf("ResourceArns.member.%d", i))
+			if arn == "" {
+				break
+			}
+			tags := ""
+			for k, v := range f.lbTags[arn] {
+				tags += fmt.Sprintf("<member><Key>%s</Key><Value>%s</Value></member>", k, v)
+			}
+			fmt.Fprintf(&descs, "<member><ResourceArn>%s</ResourceArn><Tags>%s</Tags></member>", arn, tags)
+		}
+		_, _ = fmt.Fprintf(w, `<DescribeTagsResponse xmlns="http://elasticloadbalancing.amazonaws.com/doc/2015-12-01/"><DescribeTagsResult>
+<TagDescriptions>%s</TagDescriptions></DescribeTagsResult><ResponseMetadata><RequestId>1</RequestId></ResponseMetadata></DescribeTagsResponse>`, descs.String())
 	case "ListTagsForResource":
 		if f.failTags {
 			writeError(w, "AccessDenied")
@@ -326,5 +371,162 @@ func TestIdentityTimeout(t *testing.T) {
 	var fe *FatalError
 	if !errors.As(err, &fe) || fe.Category != ErrTimeout {
 		t.Errorf("err = %v", err)
+	}
+}
+
+func countMembers(form map[string][]string, prefix string) int {
+	n := 0
+	for k := range form {
+		if strings.HasPrefix(k, prefix) {
+			n++
+		}
+	}
+	return n
+}
+
+func lbXML(name, kind, id, lbType string) (string, string) {
+	arn := fmt.Sprintf("arn:aws:elasticloadbalancing:eu-west-1:%s:loadbalancer/%s/%s/%s", account, kind, name, id)
+	return arn, fmt.Sprintf(`<member><LoadBalancerArn>%s</LoadBalancerArn><LoadBalancerName>%s</LoadBalancerName>
+<Type>%s</Type><Scheme>internet-facing</Scheme><VpcId>vpc-123</VpcId><State><Code>active</Code></State>
+<CreatedTime>2025-03-02T10:00:00Z</CreatedTime></member>`, arn, name, lbType)
+}
+
+func TestLoadBalancerDiscovery(t *testing.T) {
+	var page1, page2 strings.Builder
+	tags := map[string]map[string]string{}
+	// 25 load balancers over two pages: tags must be fetched in batches of 20.
+	for i := 0; i < 25; i++ {
+		arn, x := lbXML(fmt.Sprintf("lb-%02d", i), "app", fmt.Sprintf("%016x", i+1), "application")
+		if i < 15 {
+			page1.WriteString(x)
+		} else {
+			page2.WriteString(x)
+		}
+		tags[arn] = map[string]string{"team": "web"}
+	}
+	gwArn, gw := lbXML("gw", "gwy", "00000000000000ff", "gateway")
+	k8sArn, k8s := lbXML("k8s", "net", "00000000000000fe", "network")
+	page2.WriteString(gw + k8s)
+	tags[gwArn] = map[string]string{}
+	tags[k8sArn] = map[string]string{"elbv2.k8s.aws/cluster": "prod", "service.k8s.aws/stack": "default/web"}
+
+	f := &fakeAWS{lbPages: map[string][]string{"eu-west-1": {page1.String(), page2.String()}}, lbTags: tags}
+	inv, err := newTestAWS(t, f).Discover(context.Background(), []string{"eu-west-1"}, TypeLoadBalancer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inv.Regions) != 1 || inv.Regions[0].Type != TypeLoadBalancer || !inv.Complete() {
+		t.Fatalf("regions: %+v", inv.Regions)
+	}
+	got := inv.Instances()
+	if len(got) != 27 {
+		t.Fatalf("load balancers = %d, want 27", len(got))
+	}
+	first := got[0]
+	if first.Type != TypeLoadBalancer || first.Kind != KindALB || first.Identifier != "lb-00" || first.Scheme != "internet-facing" ||
+		first.VPCID != "vpc-123" || first.Status != "active" || first.Tags["team"] != "web" || first.Created.Year() != 2025 {
+		t.Errorf("first: %+v", first)
+	}
+	byName := map[string]Instance{}
+	for _, i := range got {
+		byName[i.Identifier] = i
+	}
+	if byName["gw"].NotCovered != NotCoveredGatewayLB || byName["gw"].Kind != KindGWLB {
+		t.Errorf("gateway: %+v", byName["gw"])
+	}
+	if byName["k8s"].ManagedBy != ManagedByKubernetes || byName["k8s"].Kind != KindNLB {
+		t.Errorf("k8s: %+v", byName["k8s"])
+	}
+	for _, n := range f.tagBatches {
+		if n > 20 {
+			t.Errorf("DescribeTags called with %d ARNs, max is 20", n)
+		}
+	}
+	if len(f.tagBatches) != 2 {
+		t.Errorf("DescribeTags calls = %d, want 2 for 27 load balancers", len(f.tagBatches))
+	}
+}
+
+func TestLoadBalancerTagFailureIsAWarning(t *testing.T) {
+	_, x := lbXML("web", "app", "0000000000000001", "application")
+	f := &fakeAWS{lbPages: map[string][]string{"eu-west-1": {x}}, failTags: true}
+	inv, err := newTestAWS(t, f).Discover(context.Background(), []string{"eu-west-1"}, TypeLoadBalancer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !inv.Complete() || !inv.Instances()[0].TagsUnavailable {
+		t.Errorf("%+v", inv.Regions)
+	}
+}
+
+func TestLoadBalancerFailureOnlyFailsThatType(t *testing.T) {
+	f := &fakeAWS{
+		pages:    map[string][]string{"eu-west-1": {db("orders-db", "db-ORDERS", `<TagList></TagList>`)}},
+		failPage: map[string]int{"lb/eu-west-1": 0},
+		failCode: "AccessDenied",
+	}
+	inv, err := newTestAWS(t, f).Discover(context.Background(), []string{"eu-west-1"}, TypeDBInstance, TypeLoadBalancer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inv.Regions) != 2 || inv.Regions[0].Type != TypeDBInstance || inv.Regions[1].Type != TypeLoadBalancer {
+		t.Fatalf("%+v", inv.Regions)
+	}
+	if inv.Regions[0].Failed || len(inv.Regions[0].Instances) != 1 {
+		t.Errorf("RDS must be unaffected: %+v", inv.Regions[0])
+	}
+	if !inv.Regions[1].Failed || inv.Regions[1].Error != ErrAccessDenied || inv.Complete() {
+		t.Errorf("load balancers: %+v", inv.Regions[1])
+	}
+	if names := inv.RegionNames(); len(names) != 1 || names[0] != "eu-west-1" {
+		t.Errorf("RegionNames = %v", names)
+	}
+}
+
+func TestManagedBy(t *testing.T) {
+	for want, tags := range map[string]map[string]string{
+		ManagedByKubernetes:       {"ingress.k8s.aws/stack": "x", "aws:cloudformation:stack-name": "eks"},
+		ManagedByElasticBeanstalk: {"elasticbeanstalk:environment-name": "prod"},
+		ManagedByCloudFormation:   {"aws:cloudformation:stack-name": "s"},
+		"":                        {"team": "web"},
+	} {
+		if got := managedBy(tags); got != want {
+			t.Errorf("managedBy(%v) = %q, want %q", tags, got, want)
+		}
+	}
+}
+
+func TestLoadBalancerLaterPageFailure(t *testing.T) {
+	_, a := lbXML("a", "app", "0000000000000001", "application")
+	_, b := lbXML("b", "app", "0000000000000002", "application")
+	f := &fakeAWS{lbPages: map[string][]string{"eu-west-1": {a, b}}, failPage: map[string]int{"lb/eu-west-1": 1}, failCode: "Throttling"}
+	inv, err := newTestAWS(t, f).Discover(context.Background(), []string{"eu-west-1"}, TypeLoadBalancer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := inv.Regions[0]
+	if !r.Failed || r.Error != ErrThrottled || len(r.Instances) != 0 {
+		t.Errorf("a later-page failure must fail the region with no partial list: %+v", r)
+	}
+}
+
+func TestConcurrencyIsBoundedAcrossTypes(t *testing.T) {
+	regions := []string{"eu-west-1", "eu-west-2", "us-east-1", "us-west-2"}
+	f := &fakeAWS{pages: map[string][]string{}, lbPages: map[string][]string{}, slow: 50 * time.Millisecond}
+	inv, err := newTestAWS(t, f).Discover(context.Background(), regions, TypeDBInstance, TypeLoadBalancer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inv.Regions) != 8 || !inv.Complete() {
+		t.Fatalf("%+v", inv.Regions)
+	}
+	for i, r := range inv.Regions {
+		wantType := []string{TypeDBInstance, TypeLoadBalancer}[i%2]
+		if r.Region != regions[i/2] || r.Type != wantType {
+			t.Errorf("result %d = %s/%s, want %s/%s", i, r.Region, r.Type, regions[i/2], wantType)
+		}
+	}
+	if f.maxSeen > maxConcurrentRegions {
+		t.Errorf("max concurrent requests = %d, want <= %d", f.maxSeen, maxConcurrentRegions)
 	}
 }

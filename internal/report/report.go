@@ -41,7 +41,8 @@ type Scan struct {
 // Region is the discovery result for one region.
 type Region struct {
 	Region        string `json:"region"`
-	Status        string `json:"status"` // ok, failed
+	ResourceType  string `json:"resource_type,omitempty"` // Terraform type scanned, e.g. aws_lb
+	Status        string `json:"status"`                  // ok, failed
 	ErrorCategory string `json:"error_category,omitempty"`
 	Error         string `json:"error,omitempty"` // fixed message for the category
 	InstanceCount int    `json:"instance_count"`
@@ -65,8 +66,9 @@ type Source struct {
 
 // Problem is an aws_db_instance object in state that could not be used.
 type Problem struct {
-	Address string `json:"address,omitempty"`
-	Kind    string `json:"kind"`
+	Address      string `json:"address,omitempty"`
+	ResourceType string `json:"resource_type,omitempty"`
+	Kind         string `json:"kind"`
 }
 
 // Summary counts findings by status.
@@ -79,8 +81,9 @@ type Summary struct {
 
 // Finding is one discovered resource and its status.
 type Finding struct {
-	ResourceType     string            `json:"resource_type"` // aws_db_instance
-	Status           string            `json:"status"`        // tracked, no_match, unable_to_verify, not_covered
+	ResourceType     string            `json:"resource_type"`  // aws_db_instance, aws_lb
+	Kind             string            `json:"kind,omitempty"` // rds, alb, nlb, gwlb
+	Status           string            `json:"status"`         // tracked, no_match, unable_to_verify, not_covered
 	NotCoveredReason string            `json:"not_covered_reason,omitempty"`
 	Partition        string            `json:"partition"`
 	AccountID        string            `json:"account_id"`
@@ -95,6 +98,7 @@ type Finding struct {
 	InstanceStatus   string            `json:"instance_status"`
 	Created          *time.Time        `json:"created,omitempty"`
 	Tags             map[string]string `json:"tags"`
+	Details          map[string]string `json:"details,omitempty"` // type-specific, e.g. scheme and vpc_id for load balancers
 	Matches          []Match           `json:"matches"`
 	Warnings         []Warning         `json:"warnings"`
 }
@@ -114,6 +118,7 @@ type Match struct {
 // Warning names the sources and addresses involved, never state values.
 type Warning struct {
 	Kind      string   `json:"kind"`
+	Tool      string   `json:"tool,omitempty"` // managed_by_other_tool: cloudformation, elastic_beanstalk, kubernetes
 	Sources   []string `json:"sources,omitempty"`
 	Addresses []string `json:"addresses,omitempty"`
 }

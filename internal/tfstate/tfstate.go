@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"unicode"
 )
@@ -45,9 +46,10 @@ const (
 	LifecycleDeposed Lifecycle = "deposed"
 )
 
-// Identity is one managed aws_db_instance object found in state, reduced to
-// the fields needed for matching.
+// Identity is one managed object of a supported type found in state,
+// reduced to the fields needed for matching.
 type Identity struct {
+	Type          string // aws_db_instance or aws_lb (aws_alb is recorded as aws_lb)
 	Address       string // e.g. module.db["eu"].aws_db_instance.main[0]
 	Lifecycle     Lifecycle
 	DeposedKey    string
@@ -82,11 +84,32 @@ const (
 	ProblemUnknownStatus      ProblemKind = "unknown_status"
 )
 
-// Problem names the resource address and the kind of problem, never values.
+// Problem names the resource address, its type and the kind of problem,
+// never values.
 // Address is empty for ProblemUnreadableResource.
 type Problem struct {
 	Address string
+	Type    string // recorded type (aws_lb for aws_alb); empty when unknown
 	Kind    ProblemKind
+}
+
+// Keep reduces the state to the given recorded types: identities and
+// problems of other types are dropped. Problems whose type is unknown
+// (unreadable resources) are always kept, because they could be any type.
+func (s *State) Keep(types []string) {
+	var ids []Identity
+	for _, id := range s.Identities {
+		if slices.Contains(types, id.Type) {
+			ids = append(ids, id)
+		}
+	}
+	var probs []Problem
+	for _, p := range s.Problems {
+		if p.Type == "" || slices.Contains(types, p.Type) {
+			probs = append(probs, p)
+		}
+	}
+	s.Identities, s.Problems = ids, probs
 }
 
 // State is the parsed, reduced form of one state snapshot.
@@ -100,7 +123,13 @@ type State struct {
 // Partial reports whether some aws_db_instance objects could not be used.
 func (s *State) Partial() bool { return len(s.Problems) > 0 }
 
-const resourceType = "aws_db_instance"
+// Supported resource types and the type oos records for each. aws_alb is the
+// older name of aws_lb and means the same resource.
+var supportedTypes = map[string]string{
+	"aws_db_instance": "aws_db_instance",
+	"aws_lb":          "aws_lb",
+	"aws_alb":         "aws_lb",
+}
 
 // Raw state shapes. Only the fields oos needs are declared, so everything
 // else (including secrets) is skipped by the decoder.
@@ -136,6 +165,7 @@ type rawInstance struct {
 type rawAttributes struct {
 	ARN        string `json:"arn"`
 	ID         string `json:"id"`
+	Name       string `json:"name"` // aws_lb
 	Identifier string `json:"identifier"`
 	ResourceID string `json:"resource_id"`
 }
@@ -172,23 +202,24 @@ func Parse(data []byte) (*State, error) {
 			st.Problems = append(st.Problems, Problem{Kind: ProblemUnreadableResource})
 			continue
 		}
-		if res.Mode != "managed" || res.Type != resourceType {
+		typ, supported := supportedTypes[res.Type]
+		if res.Mode != "managed" || !supported {
 			continue
 		}
 		for _, rawInst := range res.Instances {
 			var inst rawInstance
 			if err := json.Unmarshal(rawInst, &inst); err != nil {
-				st.Problems = append(st.Problems, Problem{Address: baseAddress(res), Kind: ProblemUnreadableObject})
+				st.Problems = append(st.Problems, Problem{Address: baseAddress(res), Type: typ, Kind: ProblemUnreadableObject})
 				continue
 			}
 			addr, ok := address(res, inst.IndexKey)
 			if !ok {
-				st.Problems = append(st.Problems, Problem{Address: baseAddress(res), Kind: ProblemUnreadableObject})
+				st.Problems = append(st.Problems, Problem{Address: baseAddress(res), Type: typ, Kind: ProblemUnreadableObject})
 				continue
 			}
-			id, kind := identity(addr, inst)
+			id, kind := identity(typ, addr, inst)
 			if kind != "" {
-				st.Problems = append(st.Problems, Problem{Address: addr, Kind: kind})
+				st.Problems = append(st.Problems, Problem{Address: addr, Type: typ, Kind: kind})
 				continue
 			}
 			st.Identities = append(st.Identities, id)
@@ -197,13 +228,13 @@ func Parse(data []byte) (*State, error) {
 	return st, nil
 }
 
-func identity(addr string, inst rawInstance) (Identity, ProblemKind) {
+func identity(typ, addr string, inst rawInstance) (Identity, ProblemKind) {
 	attrs, ok := readAttributes(inst)
 	if !ok {
 		return Identity{}, ProblemUnreadableObject
 	}
 
-	id := Identity{Address: addr, SchemaVersion: inst.SchemaVersion, Lifecycle: LifecycleCurrent}
+	id := Identity{Type: typ, Address: addr, SchemaVersion: inst.SchemaVersion, Lifecycle: LifecycleCurrent}
 	switch inst.Status {
 	case "":
 	case "tainted":
@@ -213,6 +244,10 @@ func identity(addr string, inst rawInstance) (Identity, ProblemKind) {
 	}
 	if inst.Deposed != "" {
 		id.Lifecycle, id.DeposedKey = LifecycleDeposed, inst.Deposed
+	}
+
+	if typ == "aws_lb" {
+		return lbIdentity(id, attrs)
 	}
 
 	normalise(&id, attrs)
@@ -234,6 +269,30 @@ func identity(addr string, inst rawInstance) (Identity, ProblemKind) {
 		return Identity{}, ProblemInvalidARN
 	}
 	id.ARN = attrs.ARN
+	id.Partition, id.Region, id.AccountID = arn.Partition, arn.Region, arn.AccountID
+	return id, ""
+}
+
+// lbIdentity reads an aws_lb (or aws_alb) object. Its identity is the load
+// balancer ARN, which ends in a generated suffix, so a load balancer recreated
+// with the same name has a different ARN. In state, "id" holds the ARN too.
+func lbIdentity(id Identity, a rawAttributes) (Identity, ProblemKind) {
+	arnStr := a.ARN
+	if arnStr == "" {
+		arnStr = a.ID
+	}
+	if arnStr == "" {
+		return Identity{}, ProblemMissingARN
+	}
+	arn, ok := ParseLBARN(arnStr)
+	if !ok {
+		return Identity{}, ProblemInvalidARN
+	}
+	id.ARN = arnStr
+	id.Identifier = a.Name
+	if id.Identifier == "" {
+		id.Identifier = arn.Name
+	}
 	id.Partition, id.Region, id.AccountID = arn.Partition, arn.Region, arn.AccountID
 	return id, ""
 }

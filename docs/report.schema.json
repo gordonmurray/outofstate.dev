@@ -28,6 +28,7 @@
         "required": ["region", "status", "instance_count"],
         "properties": {
           "region": { "type": "string" },
+          "resource_type": { "type": "string", "description": "Terraform resource type scanned, e.g. aws_db_instance or aws_lb (one entry per region and type)" },
           "status": { "enum": ["ok", "failed"] },
           "error_category": { "type": "string", "description": "access_denied, throttled, timeout, region_disabled, api_error" },
           "error": { "type": "string", "description": "fixed message for error_category" },
@@ -58,6 +59,7 @@
               "required": ["kind"],
               "properties": {
                 "address": { "type": "string" },
+                "resource_type": { "type": "string" },
                 "kind": { "type": "string" }
               }
             }
@@ -125,7 +127,9 @@
       "type": "object",
       "required": ["resource_type", "status", "partition", "account_id", "region", "arn", "identifier", "resource_id", "import_id", "engine", "engine_version", "class", "instance_status", "tags", "matches", "warnings"],
       "properties": {
-        "resource_type": { "type": "string", "description": "Terraform resource type, e.g. aws_db_instance" },
+        "resource_type": { "type": "string", "description": "Terraform resource type: aws_db_instance or aws_lb" },
+        "kind": { "type": "string", "description": "short label: rds, alb, nlb, gwlb" },
+        "details": { "type": "object", "additionalProperties": { "type": "string" }, "description": "type-specific details, e.g. scheme and vpc_id for load balancers" },
         "status": { "enum": ["tracked", "no_match", "unable_to_verify", "not_covered"] },
         "not_covered_reason": { "type": "string" },
         "partition": { "type": "string" },
@@ -153,7 +157,7 @@
               "lifecycle": { "enum": ["current", "tainted", "deposed"] },
               "deposed_key": { "type": "string" },
               "matched_on": { "enum": ["resource_id", "arn", "identifier"] },
-              "weak": { "type": "boolean", "description": "true unless matched_on is resource_id" },
+              "weak": { "type": "boolean", "description": "true when the match did not use the resource type's immutable identity (resource_id for RDS, the ARN for load balancers)" },
               "renamed": { "type": "boolean" }
             }
           }
@@ -176,7 +180,8 @@
       "type": "object",
       "required": ["kind"],
       "properties": {
-        "kind": { "enum": ["multiple_owners", "multiple_addresses", "stale_state_entry", "duplicate_snapshot", "diverged_copies", "tags_unavailable"], "description": "diverged_copies: several snapshots of one state (same lineage, different serial); only the first source listed, the newest, was used for matching" },
+        "kind": { "enum": ["multiple_owners", "multiple_addresses", "stale_state_entry", "duplicate_snapshot", "diverged_copies", "tags_unavailable", "managed_by_other_tool"], "description": "diverged_copies: several snapshots of one state (same lineage, different serial); only the first source listed, the newest, was used for matching" },
+        "tool": { "type": "string", "description": "managed_by_other_tool: cloudformation, elastic_beanstalk or kubernetes, inferred from tags" },
         "sources": { "type": "array", "items": { "type": "string" } },
         "addresses": { "type": "array", "items": { "type": "string" } }
       }
