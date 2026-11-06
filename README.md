@@ -149,7 +149,9 @@ Tool versions (Go, golangci-lint, GoReleaser, Terraform) are pinned in [`tools/D
 
 `make e2e` runs the full loop against a real AWS sandbox account: it creates three `db.t4g.micro` instances with Terraform, removes one from state, checks `oos` reports exactly that one, imports it back, checks `oos` is clean, and destroys everything it created. It costs a little money, so it needs explicit confirmation and an otherwise empty region.
 
-Cleanup only deletes instances that carry both the run's name prefix and its tag, and it checks that none remain. If cleanup fails (for example an AWS error or the run being killed), the script exits with code 3 and keeps the Terraform state in `test/e2e/artifacts/<run id>/`. In that case, check the region for `oos-e2e-` instances and delete them, because they keep costing money until you do.
+Cleanup first runs `terraform destroy` on the test projects, which removes only what their own state holds. As a fallback it deletes leftover instances, but only ones that carry both the run's name prefix and its tag, then checks that none remain. If cleanup fails (for example an AWS error), the script exits with code 3 and keeps the Terraform state in `test/e2e/artifacts/<run id>/`.
+
+If the run is killed outright (for example `kill -9`, or the container is stopped), no cleanup runs at all and there may be no error message. After any run that did not print `PASS`, check the region for `oos-e2e-` instances and delete them: they keep costing money until you do.
 
 ```bash
 AWS_PROFILE=sandbox AWS_REGION=eu-west-1 E2E_CONFIRM=yes make e2e
