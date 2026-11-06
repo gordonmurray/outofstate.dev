@@ -129,6 +129,7 @@ var supportedTypes = map[string]string{
 	"aws_db_instance": "aws_db_instance",
 	"aws_lb":          "aws_lb",
 	"aws_alb":         "aws_lb",
+	"aws_s3_bucket":   "aws_s3_bucket",
 }
 
 // Raw state shapes. Only the fields oos needs are declared, so everything
@@ -165,7 +166,9 @@ type rawInstance struct {
 type rawAttributes struct {
 	ARN        string `json:"arn"`
 	ID         string `json:"id"`
-	Name       string `json:"name"` // aws_lb
+	Name       string `json:"name"`   // aws_lb
+	Bucket     string `json:"bucket"` // aws_s3_bucket
+	Region     string `json:"region"` // aws_s3_bucket: the bucket's region
 	Identifier string `json:"identifier"`
 	ResourceID string `json:"resource_id"`
 }
@@ -174,6 +177,7 @@ type rawIdentity struct {
 	AccountID  string `json:"account_id"`
 	Region     string `json:"region"`
 	Identifier string `json:"identifier"`
+	Bucket     string `json:"bucket"`
 }
 
 // Parse reads one state snapshot, as printed by "terraform state pull" or
@@ -246,8 +250,15 @@ func identity(typ, addr string, inst rawInstance) (Identity, ProblemKind) {
 		id.Lifecycle, id.DeposedKey = LifecycleDeposed, inst.Deposed
 	}
 
-	if typ == "aws_lb" {
+	switch typ {
+	case "aws_lb":
 		return lbIdentity(id, attrs)
+	case "aws_s3_bucket":
+		var ri rawIdentity
+		if inst.IdentitySchemaVersion == 0 && len(inst.Identity) > 0 && string(inst.Identity) != "null" {
+			_ = json.Unmarshal(inst.Identity, &ri)
+		}
+		return bucketIdentity(id, attrs, ri)
 	}
 
 	normalise(&id, attrs)
@@ -294,6 +305,41 @@ func lbIdentity(id Identity, a rawAttributes) (Identity, ProblemKind) {
 		id.Identifier = arn.Name
 	}
 	id.Partition, id.Region, id.AccountID = arn.Partition, arn.Region, arn.AccountID
+	return id, ""
+}
+
+// bucketIdentity reads an aws_s3_bucket object. A bucket ARN
+// (arn:<partition>:s3:::<name>) has no account or region, so those come
+// from the state where it records them: the "region" attribute, or the
+// resource identity (account_id, region) of newer provider versions. When
+// they are absent they stay empty and matching treats the entry as weaker.
+func bucketIdentity(id Identity, a rawAttributes, ri rawIdentity) (Identity, ProblemKind) {
+	if a.ARN == "" {
+		return Identity{}, ProblemMissingARN
+	}
+	arn, ok := ParseS3BucketARN(a.ARN)
+	if !ok {
+		return Identity{}, ProblemInvalidARN
+	}
+	name := a.Bucket
+	if name == "" {
+		name = a.ID
+	}
+	if name != "" && name != arn.Bucket {
+		return Identity{}, ProblemInvalidARN // the ARN and the bucket name disagree
+	}
+	id.ARN, id.Identifier, id.Partition = a.ARN, arn.Bucket, arn.Partition
+	id.Region = a.Region
+	if id.Region == "" {
+		id.Region = ri.Region
+	}
+	if ri.AccountID != "" && accountRE.MatchString(ri.AccountID) {
+		id.AccountID = ri.AccountID
+	}
+	if id.Region != "" && !regionRE.MatchString(id.Region) {
+		return Identity{}, ProblemUnreadableObject
+	}
+	id.IdentityAccountID, id.IdentityRegion, id.IdentityIdentifier = ri.AccountID, ri.Region, ri.Bucket
 	return id, ""
 }
 

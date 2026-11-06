@@ -13,6 +13,8 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/smithy-go"
 )
 
 const account = "123456789012"
@@ -20,22 +22,32 @@ const account = "123456789012"
 // fakeAWS serves STS GetCallerIdentity and RDS DescribeDBInstances (query
 // protocol, XML) for the real SDK clients.
 type fakeAWS struct {
-	mu         sync.Mutex
-	pages      map[string][]string // region -> pages of <DBInstance> XML
-	failPage   map[string]int      // region -> page index that returns failCode
-	failCode   string
-	stsCode    string
-	calls      map[string]int
-	slow       time.Duration
-	failTags   bool
-	lbPages    map[string][]string          // region -> pages of <member> XML
-	lbTags     map[string]map[string]string // ARN -> tags
-	tagBatches []int                        // ARNs per DescribeTags call
-	inflight   int
-	maxSeen    int
+	mu               sync.Mutex
+	pages            map[string][]string // region -> pages of <DBInstance> XML
+	failPage         map[string]int      // region -> page index that returns failCode
+	failCode         string
+	stsCode          string
+	calls            map[string]int
+	slow             time.Duration
+	failTags         bool
+	lbPages          map[string][]string          // region -> pages of <member> XML
+	s3Pages          map[string][]string          // region -> pages of <Bucket> XML
+	s3Tags           map[string]map[string]string // bucket -> tags; absent = NoSuchTagSet
+	s3TagFail        map[string]bool              // bucket -> GetBucketTagging fails
+	s3Regions        []string                     // bucket-region filter of each ListBuckets call
+	s3TagStallFirst  map[string]bool              // bucket -> first GetBucketTagging call stalls
+	s3TagStallAlways map[string]bool              // bucket -> every GetBucketTagging call stalls
+	lbTags           map[string]map[string]string // ARN -> tags
+	tagBatches       []int                        // ARNs per DescribeTags call
+	inflight         int
+	maxSeen          int
 }
 
 func (f *fakeAWS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		f.serveS3(w, r)
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, err.Error(), 400)
 		return
@@ -529,4 +541,342 @@ func TestConcurrencyIsBoundedAcrossTypes(t *testing.T) {
 	if f.maxSeen > maxConcurrentRegions {
 		t.Errorf("max concurrent requests = %d, want <= %d", f.maxSeen, maxConcurrentRegions)
 	}
+}
+
+func (f *fakeAWS) serveS3(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	f.inflight++
+	if f.inflight > f.maxSeen {
+		f.maxSeen = f.inflight
+	}
+	f.mu.Unlock()
+	defer func() { f.mu.Lock(); f.inflight--; f.mu.Unlock() }()
+	if f.slow > 0 {
+		time.Sleep(f.slow)
+	}
+	q := r.URL.Query()
+	region := regionFromAuth(r.Header.Get("Authorization"))
+	w.Header().Set("Content-Type", "application/xml")
+	if r.URL.Path == "/" {
+		f.mu.Lock()
+		f.s3Regions = append(f.s3Regions, q.Get("bucket-region"))
+		f.calls["ListBuckets/"+region]++
+		f.mu.Unlock()
+		page0 := 0
+		if tok := q.Get("continuation-token"); tok != "" {
+			_, _ = fmt.Sscanf(tok, "page-%d", &page0)
+		}
+		if fp, ok := f.failPage["s3/"+region]; ok && fp == page0 {
+			w.WriteHeader(403)
+			_, _ = fmt.Fprint(w, `<Error><Code>AccessDenied</Code><Message>no</Message></Error>`)
+			return
+		}
+		page := 0
+		if tok := q.Get("continuation-token"); tok != "" {
+			_, _ = fmt.Sscanf(tok, "page-%d", &page)
+		}
+		pages := f.s3Pages[q.Get("bucket-region")]
+		body := ""
+		if page < len(pages) {
+			body = pages[page]
+		}
+		token := ""
+		if page+1 < len(pages) {
+			token = fmt.Sprintf("<ContinuationToken>page-%d</ContinuationToken>", page+1)
+		}
+		_, _ = fmt.Fprintf(w, `<ListAllMyBucketsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Owner><ID>o</ID></Owner><Buckets>%s</Buckets>%s</ListAllMyBucketsResult>`, body, token)
+		return
+	}
+	if _, ok := q["tagging"]; ok {
+		bucket := strings.TrimPrefix(r.URL.Path, "/")
+		f.mu.Lock()
+		f.calls["GetBucketTagging/"+bucket]++
+		stall := (f.s3TagStallFirst[bucket] && f.calls["GetBucketTagging/"+bucket] == 1) || f.s3TagStallAlways[bucket]
+		f.mu.Unlock()
+		if stall {
+			time.Sleep(500 * time.Millisecond) // longer than the test's attempt deadline
+		}
+		if f.s3TagFail[bucket] {
+			w.WriteHeader(403)
+			_, _ = fmt.Fprint(w, `<Error><Code>AccessDenied</Code><Message>no</Message></Error>`)
+			return
+		}
+		tags, ok := f.s3Tags[bucket]
+		if !ok {
+			w.WriteHeader(404)
+			_, _ = fmt.Fprint(w, `<Error><Code>NoSuchTagSet</Code><Message>The TagSet does not exist</Message></Error>`)
+			return
+		}
+		var ts strings.Builder
+		for k, v := range tags {
+			fmt.Fprintf(&ts, "<Tag><Key>%s</Key><Value>%s</Value></Tag>", k, v)
+		}
+		_, _ = fmt.Fprintf(w, `<Tagging xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><TagSet>%s</TagSet></Tagging>`, ts.String())
+		return
+	}
+	http.Error(w, "unexpected S3 request", 400)
+}
+
+func bucketXML(name, region string) string {
+	return fmt.Sprintf(`<Bucket><Name>%s</Name><CreationDate>2024-05-01T08:00:00.000Z</CreationDate><BucketRegion>%s</BucketRegion><BucketArn>arn:aws:s3:::%s</BucketArn></Bucket>`, name, region, name)
+}
+
+// pathStyle points the S3 client at the test server with path-style URLs.
+func pathStyle(a *AWS) {
+	a.newS3 = func(c aws.Config, region string) s3API {
+		return s3.NewFromConfig(c, func(o *s3.Options) { o.Region = region; o.UsePathStyle = true })
+	}
+	a.newS3PathStyle = a.newS3
+}
+
+func TestS3Discovery(t *testing.T) {
+	f := &fakeAWS{
+		s3Pages: map[string][]string{"eu-west-1": {
+			bucketXML("acme-logs", "eu-west-1") + bucketXML("cdk-hnb659fds-assets-123456789012-eu-west-1", "eu-west-1"),
+			bucketXML("tagged", "eu-west-1") + bucketXML("stack-bucket", "eu-west-1") + bucketXML("no-tag-access", "eu-west-1") +
+				bucketXML("elsewhere", "us-east-1"), // must be skipped even if the filter let it through
+		}},
+		s3Tags: map[string]map[string]string{
+			"tagged":       {"team": "data"},
+			"stack-bucket": {"aws:cloudformation:stack-name": "app"},
+		},
+		s3TagFail: map[string]bool{"no-tag-access": true},
+	}
+	a := newTestAWS(t, f)
+	pathStyle(a)
+	inv, err := a.Discover(context.Background(), []string{"eu-west-1"}, TypeS3Bucket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !inv.Complete() || len(inv.Regions) != 1 || inv.Regions[0].Type != TypeS3Bucket {
+		t.Fatalf("%+v", inv.Regions)
+	}
+	by := map[string]Instance{}
+	for _, b := range inv.Instances() {
+		by[b.Identifier] = b
+	}
+	if len(by) != 5 {
+		t.Fatalf("buckets = %d, want 5 (two pages)", len(by))
+	}
+	logs := by["acme-logs"]
+	if logs.Type != TypeS3Bucket || logs.Kind != KindS3 || logs.ARN != "arn:aws:s3:::acme-logs" || logs.Region != "eu-west-1" ||
+		logs.AccountID != account || logs.Created.Year() != 2024 || logs.TagsUnavailable || len(logs.Tags) != 0 || logs.ManagedBy != "" {
+		t.Errorf("acme-logs (no tags): %+v", logs)
+	}
+	if by["tagged"].Tags["team"] != "data" {
+		t.Errorf("tagged: %+v", by["tagged"])
+	}
+	if by["stack-bucket"].ManagedBy != ManagedByCloudFormation {
+		t.Errorf("stack-bucket: %+v", by["stack-bucket"])
+	}
+	if cdk := by["cdk-hnb659fds-assets-123456789012-eu-west-1"]; cdk.LikelyCreatedBy != ManagedByCDK || cdk.ManagedBy != "" {
+		t.Errorf("cdk bucket: %+v", by["cdk-hnb659fds-assets-123456789012-eu-west-1"])
+	}
+	if !by["no-tag-access"].TagsUnavailable {
+		t.Errorf("tag failure must be a warning: %+v", by["no-tag-access"])
+	}
+	for _, r := range f.s3Regions {
+		if r != "eu-west-1" {
+			t.Errorf("ListBuckets bucket-region = %q, want eu-west-1", r)
+		}
+	}
+	if f.calls["ListBuckets/eu-west-1"] != 2 {
+		t.Errorf("ListBuckets calls signed for eu-west-1 = %d, want 2", f.calls["ListBuckets/eu-west-1"])
+	}
+}
+
+func TestS3FailureOnlyFailsThatType(t *testing.T) {
+	f := &fakeAWS{pages: map[string][]string{"eu-west-1": {db("orders-db", "db-ORDERS", `<TagList></TagList>`)}},
+		failPage: map[string]int{"s3/eu-west-1": 0}}
+	a := newTestAWS(t, f)
+	pathStyle(a)
+	inv, err := a.Discover(context.Background(), []string{"eu-west-1"}, TypeDBInstance, TypeS3Bucket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inv.Regions[0].Failed || !inv.Regions[1].Failed || inv.Regions[1].Error != ErrAccessDenied {
+		t.Errorf("%+v", inv.Regions)
+	}
+}
+
+func TestBucketCreatedBy(t *testing.T) {
+	for name, want := range map[string]string{
+		"cdk-hnb659fds-assets-123456789012-eu-west-1": ManagedByCDK,
+		"cf-templates-1a2b3c-eu-west-1":               ManagedByCloudFormation,
+		"elasticbeanstalk-eu-west-1-123456789012":     ManagedByElasticBeanstalk,
+		"acme-logs":          "",
+		"cdk-something-else": "",
+	} {
+		if got := bucketCreatedBy(name); got != want {
+			t.Errorf("bucketCreatedBy(%q) = %q, want %q", name, got, want)
+		}
+	}
+}
+
+func TestS3TagRetryAfterStall(t *testing.T) {
+	old := tagAttemptTimeout
+	tagAttemptTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { tagAttemptTimeout = old })
+	f := &fakeAWS{
+		s3Pages:         map[string][]string{"eu-west-1": {bucketXML("slow", "eu-west-1")}},
+		s3Tags:          map[string]map[string]string{"slow": {"team": "data"}},
+		s3TagStallFirst: map[string]bool{"slow": true},
+	}
+	a := newTestAWS(t, f)
+	pathStyle(a)
+	inv, err := a.Discover(context.Background(), []string{"eu-west-1"}, TypeS3Bucket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := inv.Instances()[0]
+	if b.TagsUnavailable || b.Tags["team"] != "data" {
+		t.Errorf("a stalled first attempt must be retried: %+v", b)
+	}
+	if n := f.count("GetBucketTagging/slow"); n != 2 {
+		t.Errorf("tag calls = %d, want 2", n)
+	}
+}
+
+// refusePathStyle fails every GetBucketTagging call, as a bucket that does
+// not accept path-style requests would.
+type refusePathStyle struct{ *s3.Client }
+
+func (refusePathStyle) GetBucketTagging(context.Context, *s3.GetBucketTaggingInput, ...func(*s3.Options)) (*s3.GetBucketTaggingOutput, error) {
+	return nil, &smithy.GenericAPIError{Code: "PermanentRedirect", Message: "use the bucket endpoint"}
+}
+
+func TestS3TagsFallBackToVirtualHosted(t *testing.T) {
+	f := &fakeAWS{
+		s3Pages: map[string][]string{"eu-west-1": {bucketXML("picky", "eu-west-1") + bucketXML("untagged", "eu-west-1")}},
+		s3Tags:  map[string]map[string]string{"picky": {"team": "data"}},
+	}
+	a := newTestAWS(t, f)
+	pathStyle(a)
+	virtual := a.newS3
+	a.newS3PathStyle = func(c aws.Config, region string) s3API {
+		return refusePathStyle{virtual(c, region).(*s3.Client)}
+	}
+	inv, err := a.Discover(context.Background(), []string{"eu-west-1"}, TypeS3Bucket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	by := map[string]Instance{}
+	for _, b := range inv.Instances() {
+		by[b.Identifier] = b
+	}
+	if by["picky"].Tags["team"] != "data" || by["picky"].TagsUnavailable {
+		t.Errorf("picky: %+v", by["picky"])
+	}
+	if by["untagged"].TagsUnavailable || len(by["untagged"].Tags) != 0 {
+		t.Errorf("untagged: %+v", by["untagged"])
+	}
+}
+
+func TestS3LaterPageFailure(t *testing.T) {
+	f := &fakeAWS{s3Pages: map[string][]string{"eu-west-1": {bucketXML("a-bucket", "eu-west-1"), bucketXML("b-bucket", "eu-west-1")}},
+		failPage: map[string]int{"s3/eu-west-1": 1}}
+	a := newTestAWS(t, f)
+	pathStyle(a)
+	inv, err := a.Discover(context.Background(), []string{"eu-west-1"}, TypeS3Bucket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := inv.Regions[0]; !r.Failed || len(r.Instances) != 0 {
+		t.Errorf("a later-page failure must fail the region with no partial list: %+v", r)
+	}
+}
+
+func TestS3TagRetriesAreBounded(t *testing.T) {
+	old := tagAttemptTimeout
+	tagAttemptTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { tagAttemptTimeout = old })
+	f := &fakeAWS{s3Pages: map[string][]string{"eu-west-1": {bucketXML("stuck", "eu-west-1")}},
+		s3Tags: map[string]map[string]string{"stuck": {"a": "b"}}, s3TagStallAlways: map[string]bool{"stuck": true}}
+	a := newTestAWS(t, f)
+	pathStyle(a)
+	start := time.Now()
+	inv, err := a.Discover(context.Background(), []string{"eu-west-1"}, TypeS3Bucket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := inv.Instances()[0]; !b.TagsUnavailable {
+		t.Errorf("exhausted retries must be a tag warning: %+v", b)
+	}
+	if n := f.count("GetBucketTagging/stuck"); n != 2*tagAttempts {
+		t.Errorf("tag calls = %d, want %d (attempts per addressing style x 2)", n, 2*tagAttempts)
+	}
+	if d := time.Since(start); d > 3*time.Second {
+		t.Errorf("took %s", d)
+	}
+}
+
+func TestS3TagConcurrencyIsBounded(t *testing.T) {
+	old := tagWorkers
+	tagWorkers = 4
+	t.Cleanup(func() { tagWorkers = old })
+	var page strings.Builder
+	for i := 0; i < 30; i++ {
+		page.WriteString(bucketXML(fmt.Sprintf("bucket-%02d", i), "eu-west-1"))
+	}
+	f := &fakeAWS{s3Pages: map[string][]string{"eu-west-1": {page.String()}}, slow: 20 * time.Millisecond}
+	a := newTestAWS(t, f)
+	pathStyle(a)
+	inv, err := a.Discover(context.Background(), []string{"eu-west-1"}, TypeS3Bucket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inv.Instances()) != 30 {
+		t.Fatalf("buckets = %d", len(inv.Instances()))
+	}
+	if f.maxSeen > 4 {
+		t.Errorf("max concurrent S3 requests = %d, want <= 4", f.maxSeen)
+	}
+}
+
+func TestS3CancellationStopsTagging(t *testing.T) {
+	old := tagWorkers
+	tagWorkers = 1
+	t.Cleanup(func() { tagWorkers = old })
+	var page strings.Builder
+	for i := 0; i < 20; i++ {
+		page.WriteString(bucketXML(fmt.Sprintf("bucket-%02d", i), "eu-west-1"))
+	}
+	f := &fakeAWS{s3Pages: map[string][]string{"eu-west-1": {page.String()}}, slow: 50 * time.Millisecond}
+	a := newTestAWS(t, f)
+	pathStyle(a)
+	a.regionTimeout = 300 * time.Millisecond // listing (~50ms) succeeds, tagging is cut short
+	inv, err := a.Discover(context.Background(), []string{"eu-west-1"}, TypeS3Bucket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unavailable := 0
+	for _, b := range inv.Instances() {
+		if b.TagsUnavailable {
+			unavailable++
+		}
+	}
+	tagCalls := f.countPrefix("GetBucketTagging/")
+	if unavailable == 0 || tagCalls >= 20 {
+		t.Errorf("after the deadline no new buckets should be tagged: %d tag calls, %d marked unavailable", tagCalls, unavailable)
+	}
+}
+
+// count and countPrefix read the call counters under the lock: handlers for
+// requests the client already gave up on can still be running.
+func (f *fakeAWS) count(key string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls[key]
+}
+
+func (f *fakeAWS) countPrefix(prefix string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for k, v := range f.calls {
+		if strings.HasPrefix(k, prefix) {
+			n += v
+		}
+	}
+	return n
 }

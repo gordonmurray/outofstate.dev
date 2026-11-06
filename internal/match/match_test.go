@@ -551,3 +551,51 @@ func TestRDSWeakMatches(t *testing.T) {
 		}
 	}
 }
+
+func bucketInst(name, region string) discover.Instance {
+	return discover.Instance{Type: discover.TypeS3Bucket, Kind: discover.KindS3, Partition: "aws", AccountID: acctA,
+		Region: region, ARN: "arn:aws:s3:::" + name, Identifier: name}
+}
+
+func bucketIdent(addr, name, region, account string) tfstate.Identity {
+	return tfstate.Identity{Type: "aws_s3_bucket", Address: addr, Lifecycle: tfstate.LifecycleCurrent,
+		ARN: "arn:aws:s3:::" + name, Identifier: name, Partition: "aws", Region: region, AccountID: account}
+}
+
+func TestS3Matching(t *testing.T) {
+	tests := []struct {
+		name     string
+		inst     discover.Instance
+		id       tfstate.Identity
+		status   Status
+		weak     bool
+		warnings []WarningKind
+	}{
+		{"name and region", bucketInst("logs", euw1), bucketIdent("aws_s3_bucket.logs", "logs", euw1, ""), StatusTracked, false, nil},
+		{"name, region and account", bucketInst("logs", euw1), bucketIdent("aws_s3_bucket.logs", "logs", euw1, acctA), StatusTracked, false, nil},
+		{"no region in state: weaker", bucketInst("logs", euw1), bucketIdent("aws_s3_bucket.logs", "logs", "", ""), StatusTracked, true, nil},
+		{"state says another region: stale", bucketInst("logs", use1), bucketIdent("aws_s3_bucket.logs", "logs", euw1, ""), StatusNoMatch, false, []WarningKind{WarnStaleStateEntry}},
+		{"state from another account", bucketInst("logs", euw1), bucketIdent("aws_s3_bucket.logs", "logs", euw1, acctB), StatusNoMatch, false, nil},
+		{"different bucket", bucketInst("logs", euw1), bucketIdent("aws_s3_bucket.other", "other", euw1, ""), StatusNoMatch, false, nil},
+		{"same bucket, other name in state", bucketInst("exports", euw1), bucketIdent("aws_s3_bucket.logs", "logs", euw1, ""), StatusNoMatch, false, nil},
+		{"legacy bucket name", bucketInst("Legacy_Bucket.2017", use1), bucketIdent("aws_s3_bucket.legacy", "Legacy_Bucket.2017", use1, ""), StatusTracked, false, nil},
+		{"other partition", bucketInst("logs", euw1), func() tfstate.Identity {
+			i := bucketIdent("aws_s3_bucket.logs", "logs", euw1, "")
+			i.Partition, i.ARN = "aws-cn", "arn:aws-cn:s3:::logs"
+			return i
+		}(), StatusNoMatch, false, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res := Run([]discover.Instance{tt.inst}, []Source{src("a", "L1", 1, tt.id)})
+			f := res.Findings[0]
+			if f.Status != tt.status {
+				t.Fatalf("status = %s, want %s", f.Status, tt.status)
+			}
+			if tt.status == StatusTracked && (f.Matches[0].MatchedOn != KeyARN || f.Matches[0].Weak != tt.weak) {
+				t.Errorf("match = %+v", f.Matches[0])
+			}
+			checkWarnings(t, "finding", f.Warnings, tt.warnings)
+		})
+	}
+}

@@ -196,6 +196,7 @@ func TestReportsMatchSchema(t *testing.T) {
 		"--cost with fake inventory": {"--inventory-file", td("inventory.json"), "--state-file", td("app.tfstate.json"), "--cost"},
 		"duplicate state":            {"--inventory-file", td("inventory.json"), "--state-file", td("app.tfstate.json"), "--state-file", td("app-copy.tfstate.json")},
 		"load balancers":             {"--inventory-file", td("inventory_with_lb.json"), "--state-file", td("app.tfstate.json"), "--state-file", td("edge.tfstate.json")},
+		"s3 buckets":                 {"--inventory-file", td("inventory_with_s3.json"), "--state-file", td("storage.tfstate.json")},
 	}
 	if err := os.WriteFile(td("app-copy.tfstate.json"), mustRead(t, td("app.tfstate.json")), 0o600); err != nil {
 		t.Fatal(err)
@@ -520,7 +521,7 @@ func TestLoadBalancers(t *testing.T) {
 		"  legacy-alb               eu-west-1       alb   internal         vpc-1",
 		"  web-alb                  eu-west-1       alb   testdata/edge.tfstate.json (unknown) aws_lb.web (arn)",
 		"  inspection               eu-west-1       gwlb  Gateway Load Balancer",
-		"k8s-ingress: its tags suggest it is managed by Kubernetes (AWS Load Balancer Controller), not Terraform",
+		"k8s-ingress: its tags suggest it is managed by Kubernetes (AWS Load Balancer Controller)",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("text missing %q:\n%s", want, text)
@@ -560,7 +561,7 @@ func TestTypeFlag(t *testing.T) {
 	if _, m := count("--type", "rds,alb"); m["aws_db_instance"] != 4 || m["aws_lb"] != 4 {
 		t.Errorf("--type rds,alb: %v", m)
 	}
-	if code, _ := count("--type", "s3"); code != scan.ExitFatal {
+	if code, _ := count("--type", "sqs"); code != scan.ExitFatal {
 		t.Errorf("unknown type: exit %d", code)
 	}
 }
@@ -574,5 +575,54 @@ func TestOtherTypesCannotMakeAScanPartial(t *testing.T) {
 	}
 	if code, _, _ := oos(t, args...); code != scan.ExitPartial {
 		t.Errorf("all types: exit %d, want %d", code, scan.ExitPartial)
+	}
+}
+
+func TestS3Buckets(t *testing.T) {
+	args := []string{"--inventory-file", td("inventory_with_s3.json"), "--type", "s3", "--state-file", td("storage.tfstate.json")}
+	code, out, _ := oos(t, append(args, "--format", "json")...)
+	if code != scan.ExitNoMatch {
+		t.Fatalf("exit = %d", code)
+	}
+	var rep struct {
+		Findings []struct {
+			Identifier string `json:"identifier"`
+			Kind       string `json:"kind"`
+			Status     string `json:"status"`
+			ImportID   string `json:"import_id"`
+			Warnings   []struct {
+				Kind string `json:"kind"`
+				Tool string `json:"tool"`
+			} `json:"warnings"`
+		} `json:"findings"`
+	}
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatal(err)
+	}
+	by := map[string]int{}
+	for i, f := range rep.Findings {
+		by[f.Identifier] = i
+	}
+	if f := rep.Findings[by["acme-logs"]]; f.Status != "tracked" || f.Kind != "s3" {
+		t.Errorf("acme-logs: %+v", f)
+	}
+	if f := rep.Findings[by["acme-exports"]]; f.Status != "no_match" || f.ImportID != "acme-exports" {
+		t.Errorf("acme-exports (only a bucket policy in state): %+v", f)
+	}
+	if f := rep.Findings[by["acme-legacy"]]; f.Status != "no_match" || len(f.Warnings) != 1 || f.Warnings[0].Kind != "stale_state_entry" {
+		t.Errorf("acme-legacy (state says another region): %+v", f)
+	}
+	if f := rep.Findings[by["cdk-hnb659fds-assets-123456789012-eu-west-1"]]; len(f.Warnings) != 1 || f.Warnings[0].Tool != "cdk" {
+		t.Errorf("cdk bucket: %+v", f)
+	}
+
+	_, text, _ := oos(t, args...)
+	for _, want := range []string{
+		"  acme-logs                eu-west-1       s3    testdata/storage.tfstate.json (unknown) aws_s3_bucket.logs (arn)",
+		"its name suggests it was created by CDK (bootstrap)",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("text missing %q:\n%s", want, text)
+		}
 	}
 }

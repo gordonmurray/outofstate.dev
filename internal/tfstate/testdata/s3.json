@@ -1,0 +1,225 @@
+{
+  "version": 4,
+  "terraform_version": "1.17.1",
+  "serial": 1,
+  "lineage": "s3-lineage",
+  "outputs": {},
+  "resources": [
+    {
+      "mode": "managed",
+      "type": "aws_s3_bucket",
+      "name": "logs",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "arn": "arn:aws:s3:::acme-logs",
+            "bucket": "acme-logs",
+            "id": "acme-logs",
+            "region": "eu-west-1",
+            "bucket_domain_name": "acme-logs.s3.amazonaws.com",
+            "policy": "OOS-SECRET-MARKER",
+            "tags": {
+              "secret": "OOS-SECRET-MARKER"
+            }
+          },
+          "sensitive_attributes": []
+        }
+      ],
+      "module": "module.logging"
+    },
+    {
+      "mode": "managed",
+      "type": "aws_s3_bucket",
+      "name": "no_region",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "arn": "arn:aws:s3:::old-provider-bucket",
+            "bucket": "old-provider-bucket",
+            "id": "old-provider-bucket",
+            "region": "",
+            "bucket_domain_name": "old-provider-bucket.s3.amazonaws.com",
+            "policy": "OOS-SECRET-MARKER",
+            "tags": {
+              "secret": "OOS-SECRET-MARKER"
+            }
+          },
+          "sensitive_attributes": []
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_s3_bucket",
+      "name": "v6",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "arn": "arn:aws:s3:::with-identity",
+            "bucket": "with-identity",
+            "id": "with-identity",
+            "region": "eu-west-1",
+            "bucket_domain_name": "with-identity.s3.amazonaws.com",
+            "policy": "OOS-SECRET-MARKER",
+            "tags": {
+              "secret": "OOS-SECRET-MARKER"
+            }
+          },
+          "sensitive_attributes": [],
+          "identity_schema_version": 0,
+          "identity": {
+            "account_id": "123456789012",
+            "region": "eu-west-1",
+            "bucket": "with-identity"
+          }
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_s3_bucket_policy",
+      "name": "only_policy",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "bucket": "policy-only-bucket",
+            "id": "policy-only-bucket",
+            "policy": "OOS-SECRET-MARKER"
+          }
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_s3_bucket_versioning",
+      "name": "v",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "bucket": "versioned-bucket",
+            "id": "versioned-bucket"
+          }
+        }
+      ]
+    },
+    {
+      "mode": "data",
+      "type": "aws_s3_bucket",
+      "name": "lookup",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "arn": "arn:aws:s3:::looked-up-bucket",
+            "bucket": "looked-up-bucket",
+            "id": "looked-up-bucket",
+            "region": "eu-west-1",
+            "bucket_domain_name": "looked-up-bucket.s3.amazonaws.com",
+            "policy": "OOS-SECRET-MARKER",
+            "tags": {
+              "secret": "OOS-SECRET-MARKER"
+            }
+          },
+          "sensitive_attributes": []
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_s3_bucket",
+      "name": "mismatch",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "arn": "arn:aws:s3:::other-name",
+            "bucket": "one-name",
+            "id": "one-name",
+            "region": "eu-west-1",
+            "bucket_domain_name": "one-name.s3.amazonaws.com",
+            "policy": "OOS-SECRET-MARKER",
+            "tags": {
+              "secret": "OOS-SECRET-MARKER"
+            }
+          },
+          "sensitive_attributes": []
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_s3_bucket",
+      "name": "object_arn",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "arn": "arn:aws:s3:::objarn/key.txt",
+            "bucket": "objarn",
+            "id": "objarn",
+            "region": "eu-west-1",
+            "bucket_domain_name": "objarn.s3.amazonaws.com",
+            "policy": "OOS-SECRET-MARKER",
+            "tags": {
+              "secret": "OOS-SECRET-MARKER"
+            }
+          },
+          "sensitive_attributes": []
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_s3_bucket",
+      "name": "legacy",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "arn": "arn:aws:s3:::Legacy_Bucket.2017",
+            "bucket": "Legacy_Bucket.2017",
+            "id": "Legacy_Bucket.2017",
+            "region": "us-east-1"
+          }
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_s3_bucket",
+      "name": "idonly",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "arn": "arn:aws:s3:::identity-region-only",
+            "bucket": "identity-region-only",
+            "id": "identity-region-only",
+            "region": ""
+          },
+          "identity_schema_version": 0,
+          "identity": {
+            "account_id": "123456789012",
+            "region": "eu-west-2",
+            "bucket": "identity-region-only"
+          }
+        }
+      ]
+    }
+  ]
+}

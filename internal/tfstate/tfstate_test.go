@@ -330,7 +330,7 @@ func TestUnreadableResourceMakesSourcePartial(t *testing.T) {
 func TestUnreadableIgnoredResourceDoesNotBreakSnapshot(t *testing.T) {
 	// A malformed instance on an unrelated resource type is not decoded at all.
 	data := []byte(`{"version":4,"lineage":"l","serial":1,"resources":[
-		{"mode":"managed","type":"aws_s3_bucket","name":"b","instances":[{"schema_version":"weird","status":42}]},
+		{"mode":"managed","type":"aws_sqs_queue","name":"q","instances":[{"schema_version":"weird","status":42}]},
 		{"mode":"managed","type":"aws_db_instance","name":"ok","instances":[{"schema_version":2,"attributes":{` + goodARN + `,"resource_id":"db-OK"}}]}]}`)
 	st, err := Parse(data)
 	if err != nil {
@@ -496,5 +496,54 @@ func TestKeepTypes(t *testing.T) {
 	st.Keep([]string{"aws_db_instance"})
 	if len(st.Identities) != 1 || len(st.Problems) != 1 || st.Problems[0].Kind != ProblemUnreadableResource {
 		t.Errorf("identities=%+v problems=%+v (an unreadable resource of unknown type must stay)", st.Identities, st.Problems)
+	}
+}
+
+func TestS3Buckets(t *testing.T) {
+	st := parse(t, "s3.json")
+	got := byAddress(st)
+	want := map[string]struct{ name, region, account string }{
+		`module.logging.aws_s3_bucket.logs`: {"acme-logs", "eu-west-1", ""},
+		`aws_s3_bucket.no_region`:           {"old-provider-bucket", "", ""},
+		`aws_s3_bucket.v6`:                  {"with-identity", "eu-west-1", "123456789012"},
+		`aws_s3_bucket.legacy`:              {"Legacy_Bucket.2017", "us-east-1", ""},
+		`aws_s3_bucket.idonly`:              {"identity-region-only", "eu-west-2", "123456789012"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %v (policy, versioning and data source entries must not count)", keys(got))
+	}
+	for addr, w := range want {
+		id := got[addr]
+		if id.Type != "aws_s3_bucket" || id.Identifier != w.name || id.Region != w.region || id.AccountID != w.account || id.Partition != "aws" {
+			t.Errorf("%s: %+v", addr, id)
+		}
+	}
+	probs := map[string]ProblemKind{}
+	for _, p := range st.Problems {
+		probs[p.Address] = p.Kind
+	}
+	if probs["aws_s3_bucket.mismatch"] != ProblemInvalidARN || probs["aws_s3_bucket.object_arn"] != ProblemInvalidARN || len(probs) != 2 {
+		t.Errorf("problems: %+v", st.Problems)
+	}
+}
+
+func TestParseS3BucketARN(t *testing.T) {
+	for in, ok := range map[string]bool{
+		"arn:aws:s3:::my-bucket":                           true,
+		"arn:aws:s3:::my.bucket.with.dots":                 true,
+		"arn:aws-cn:s3:::cn-bucket":                        true,
+		"arn:aws:s3:::ab":                                  false, // too short
+		"arn:aws:s3:::My_Legacy.Bucket":                    true,  // pre-2018 us-east-1 names
+		"arn:aws:s3:::bucket with space":                   false,
+		"arn:aws:s3:::bad..dots":                           true,  // allowed in legacy names
+		"arn:aws:s3:::bucket/key":                          false, // object
+		"arn:aws:s3:eu-west-1:123456789012:bucket":         false,
+		"arn:aws:s3:eu-west-1:123456789012:accesspoint/ap": false,
+		"arn:aws:rds:eu-west-1:123456789012:db:x":          false,
+		"": false,
+	} {
+		if _, got := ParseS3BucketARN(in); got != ok {
+			t.Errorf("ParseS3BucketARN(%q) = %v, want %v", in, got, ok)
+		}
 	}
 }
