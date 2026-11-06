@@ -1,15 +1,15 @@
 Out of State · account 123456789012 · eu-west-1 · 2026-11-06 10:42 UTC
 Scan: complete
-  source  testdata/app.tfstate.json (unknown) ✓
-  source  testdata/shared.tfstate.json (unknown) ✓
+  source  testdata/app.tfstate.json (unknown) ✓ 10:42:00
+  source  testdata/shared.tfstate.json (unknown) ✓ 10:42:00
 
 1 import candidate(s): RDS instances with no match in the supplied states
 
-  analytics-db             db.r6g.large     postgres 16.2    available
+  analytics-db             db.r6g.large     postgres 16.2    available    created 2025-03-02
 
 2 tracked in state
-  legacy-reports           testdata/shared.tfstate.json aws_db_instance.legacy
-  orders-db                testdata/app.tfstate.json aws_db_instance.orders
+  legacy-reports           testdata/shared.tfstate.json (unknown) aws_db_instance.legacy (resource_id)
+  orders-db                testdata/app.tfstate.json (unknown) aws_db_instance.orders (resource_id)
 
 1 not covered
   billing-cluster-1        member of an Aurora or Multi-AZ DB cluster
@@ -20,6 +20,7 @@ Evidence
     resource id  db-ANALYTICS
     import id    analytics-db
     region       eu-west-1
+    created      2025-03-02
     engine       postgres 16.2 · db.r6g.large · status available
     tags         team=data
     checked      testdata/app.tfstate.json (unknown, ok), testdata/shared.tfstate.json (unknown, ok)

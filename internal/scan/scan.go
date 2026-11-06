@@ -96,6 +96,7 @@ func Run(in Input) *report.Report {
 			Version:           in.Version,
 			Partition:         in.Inventory.Partition,
 			AccountID:         in.Inventory.AccountID,
+			Regions:           []string{},
 			Complete:          res.StateComplete && discoveryComplete,
 			StateComplete:     res.StateComplete,
 			DiscoveryComplete: discoveryComplete,
@@ -109,7 +110,7 @@ func Run(in Input) *report.Report {
 		r.Scan.Regions = append(r.Scan.Regions, reg.Region)
 		rr := report.Region{Region: reg.Region, Status: "ok", InstanceCount: len(reg.Instances)}
 		if reg.Failed {
-			rr.Status, rr.Error = "failed", reg.Error
+			rr.Status, rr.ErrorCategory, rr.Error = "failed", string(reg.Error), reg.Error.Message()
 		}
 		r.Regions = append(r.Regions, rr)
 	}
@@ -155,7 +156,8 @@ func source(s LoadedSource) report.Source {
 		ObservedAt: s.ObservedAt.UTC(),
 	}
 	if s.State != nil {
-		rs.Lineage, rs.Serial, rs.IdentityCount = s.State.Lineage, s.State.Serial, len(s.State.Identities)
+		lineage, serial := s.State.Lineage, s.State.Serial
+		rs.Lineage, rs.Serial, rs.IdentityCount = &lineage, &serial, len(s.State.Identities)
 		for _, p := range s.State.Problems {
 			rs.Problems = append(rs.Problems, report.Problem{Address: p.Address, Kind: string(p.Kind)})
 		}

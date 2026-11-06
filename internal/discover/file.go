@@ -19,8 +19,45 @@ type Inventory struct {
 type RegionResult struct {
 	Region    string
 	Failed    bool
-	Error     string // fixed category, never raw API output
+	Error     ErrorCategory // fixed category, never raw API output
 	Instances []Instance
+}
+
+// ErrorCategory is a fixed class of discovery failure. Raw AWS error text is
+// never carried into the report: it can contain account details.
+type ErrorCategory string
+
+// Discovery error categories.
+const (
+	ErrAccessDenied   ErrorCategory = "access_denied"
+	ErrThrottled      ErrorCategory = "throttled"
+	ErrTimeout        ErrorCategory = "timeout"
+	ErrRegionDisabled ErrorCategory = "region_disabled"
+	ErrAPI            ErrorCategory = "api_error"
+)
+
+var errorMessages = map[ErrorCategory]string{
+	ErrAccessDenied:   "access denied (check the IAM permissions in the README)",
+	ErrThrottled:      "AWS throttled the requests; try again",
+	ErrTimeout:        "timed out",
+	ErrRegionDisabled: "the region is not enabled for this account",
+	ErrAPI:            "the AWS API returned an error",
+}
+
+// Message returns the fixed, printable message for a category.
+func (c ErrorCategory) Message() string {
+	if m, ok := errorMessages[c]; ok {
+		return m
+	}
+	return errorMessages[ErrAPI]
+}
+
+// knownCategory maps any value to a known category.
+func knownCategory(s string) ErrorCategory {
+	if _, ok := errorMessages[ErrorCategory(s)]; ok {
+		return ErrorCategory(s)
+	}
+	return ErrAPI
 }
 
 // Instances returns every instance from every successful region.
@@ -80,7 +117,10 @@ func LoadFile(path string) (*Inventory, error) {
 	}
 	inv := &Inventory{Partition: f.Partition, AccountID: f.AccountID}
 	for _, r := range f.Regions {
-		rr := RegionResult{Region: r.Region, Failed: r.Error != "", Error: r.Error}
+		rr := RegionResult{Region: r.Region, Failed: r.Error != ""}
+		if rr.Failed {
+			rr.Error = knownCategory(r.Error)
+		}
 		if !rr.Failed {
 			for _, i := range r.Instances {
 				inst := Instance{

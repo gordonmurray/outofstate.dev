@@ -29,7 +29,7 @@ func WriteText(w io.Writer, r *Report) error {
 		case "failed":
 			mark = "FAILED"
 		}
-		p.f("  source  %s (%s) %s\n", clean(s.Name), clean(s.Workspace), mark)
+		p.f("  source  %s (%s) %s %s\n", clean(s.Name), clean(s.Workspace), mark, s.ObservedAt.UTC().Format("15:04:05"))
 		if s.Error != "" {
 			p.f("          %s\n", s.Error)
 		}
@@ -39,14 +39,14 @@ func WriteText(w io.Writer, r *Report) error {
 	}
 	for _, reg := range r.Regions {
 		if reg.Status == "failed" {
-			p.f("  region  %s FAILED: %s\n", clean(reg.Region), reg.Error)
+			p.f("  region  %s FAILED: %s\n", clean(reg.Region), clean(reg.Error))
 		}
 	}
 	p.f("\n")
 
 	inScope := r.Summary.Tracked + r.Summary.NoMatch + r.Summary.UnableToVerify
-	if inScope == 0 && r.Summary.NotCovered == 0 {
-		p.f("0 in-scope RDS instances in %s\n", clean(scope))
+	if inScope == 0 {
+		p.f("0 in-scope RDS instances in %s\n\n", clean(scope))
 	}
 
 	candidates := filter(r.Findings, "no_match")
@@ -57,29 +57,38 @@ func WriteText(w io.Writer, r *Report) error {
 	if len(candidates) > 0 {
 		p.f("%d import candidate(s): RDS instances with no match in the supplied states\n\n", len(candidates))
 		for _, f := range candidates {
-			p.f("  %-24s %-16s %-16s %s\n", clean(f.Identifier), clean(f.Class), clean(f.Engine+" "+f.EngineVersion), clean(f.InstanceStatus))
+			p.f("  %-24s %-16s %-16s %-12s %s\n", clean(f.Identifier), clean(f.Class), clean(f.Engine+" "+f.EngineVersion), clean(f.InstanceStatus), created(f))
 		}
 		p.f("\n")
 	}
 	if len(unverified) > 0 {
 		p.f("%d unable to verify: no match, but a source could not be read fully\n\n", len(unverified))
 		for _, f := range unverified {
-			p.f("  %-24s %-16s %s\n", clean(f.Identifier), clean(f.Class), clean(f.Engine+" "+f.EngineVersion))
+			p.f("  %-24s %-16s %-16s %-12s %s\n", clean(f.Identifier), clean(f.Class), clean(f.Engine+" "+f.EngineVersion), clean(f.InstanceStatus), created(f))
 		}
 		p.f("\n")
 	}
 	if len(tracked) > 0 {
 		p.f("%d tracked in state\n", len(tracked))
 		for _, f := range tracked {
-			m := f.Matches[0]
-			extra := ""
-			if len(f.Matches) > 1 {
-				extra = fmt.Sprintf(" (+%d more)", len(f.Matches)-1)
+			for i, m := range f.Matches {
+				name := clean(f.Identifier)
+				if i > 0 {
+					name = ""
+				}
+				extra := " (" + m.MatchedOn
+				if m.Weak {
+					extra += ", weaker match"
+				}
+				if m.Renamed {
+					extra += ", renamed since state was written"
+				}
+				if m.Lifecycle != "current" {
+					extra += ", " + m.Lifecycle
+				}
+				extra += ")"
+				p.f("  %-24s %s (%s) %s%s\n", name, clean(m.Source), clean(m.Workspace), clean(m.Address), extra)
 			}
-			if m.Weak {
-				extra += " (matched on " + m.MatchedOn + ")"
-			}
-			p.f("  %-24s %-16s %s%s\n", clean(f.Identifier), clean(m.Source), clean(m.Address), extra)
 		}
 		p.f("\n")
 	}
@@ -126,6 +135,9 @@ func WriteText(w io.Writer, r *Report) error {
 			p.f("    resource id  %s\n", clean(f.ResourceID))
 			p.f("    import id    %s\n", clean(f.ImportID))
 			p.f("    region       %s\n", clean(f.Region))
+			if f.Created != nil {
+				p.f("    created      %s\n", f.Created.UTC().Format("2006-01-02"))
+			}
 			p.f("    engine       %s · %s · status %s\n", clean(f.Engine+" "+f.EngineVersion), clean(f.Class), clean(f.InstanceStatus))
 			if len(f.Tags) > 0 {
 				p.f("    tags         %s\n", tags(f.Tags))
@@ -148,6 +160,13 @@ func (p *printer) f(format string, a ...any) {
 		return
 	}
 	_, p.err = fmt.Fprintf(p.w, format, a...)
+}
+
+func created(f Finding) string {
+	if f.Created == nil {
+		return ""
+	}
+	return "created " + f.Created.UTC().Format("2006-01-02")
 }
 
 func filter(fs []Finding, status string) []Finding {

@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/santhosh-tekuri/jsonschema/v6"
+
 	"github.com/gordonmurray/outofstate.dev/internal/scan"
 )
 
@@ -143,7 +145,10 @@ func TestPartialScanMarksUnverified(t *testing.T) {
 	_, out, _ := oos(t, "--format", "json", "--inventory-file", td("inventory.json"),
 		"--state-file", td("app.tfstate.json"), "--state-file", td("broken.tfstate.json"))
 	var rep struct {
-		Scan    struct{ Complete, StateComplete bool } `json:"scan"`
+		Scan struct {
+			Complete      bool `json:"complete"`
+			StateComplete bool `json:"state_complete"`
+		} `json:"scan"`
 		Summary struct {
 			NoMatch        int `json:"no_match"`
 			UnableToVerify int `json:"unable_to_verify"`
@@ -156,7 +161,7 @@ func TestPartialScanMarksUnverified(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &rep); err != nil {
 		t.Fatal(err)
 	}
-	if rep.Scan.Complete || rep.Summary.NoMatch != 0 || rep.Summary.UnableToVerify != 2 {
+	if rep.Scan.Complete || rep.Scan.StateComplete || rep.Summary.NoMatch != 0 || rep.Summary.UnableToVerify != 2 {
 		t.Errorf("%+v", rep)
 	}
 	if rep.Sources[1].Status != "failed" || rep.Sources[1].ErrorCategory != "invalid_json" {
@@ -173,5 +178,163 @@ func TestDuplicateStateFilesAreDeduplicated(t *testing.T) {
 	}
 	if len(rep.Sources) != 1 {
 		t.Errorf("sources = %d, want 1", len(rep.Sources))
+	}
+}
+
+func TestReportsMatchSchema(t *testing.T) {
+	c := jsonschema.NewCompiler()
+	c.AssertFormat()
+	schema, err := c.Compile(filepath.Join("..", "..", "docs", "report.schema.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	scenarios := map[string][]string{
+		"complete":          {"--inventory-file", td("inventory.json"), "--state-file", td("app.tfstate.json"), "--state-file", td("shared.tfstate.json")},
+		"partial source":    {"--inventory-file", td("inventory.json"), "--state-file", td("partial.tfstate.json"), "--state-file", td("broken.tfstate.json"), "--state-file", td("nope.json")},
+		"region failed":     {"--inventory-file", td("inventory_region_failed.json"), "--state-file", td("app.tfstate.json")},
+		"empty inventory":   {"--inventory-file", td("inventory_empty.json"), "--state-file", td("app.tfstate.json")},
+		"only not covered":  {"--inventory-file", td("inventory_not_covered_only.json"), "--state-file", td("app.tfstate.json")},
+		"no cost requested": {"--inventory-file", td("inventory.json"), "--state-file", td("app.tfstate.json"), "--no-cost"},
+		"duplicate state":   {"--inventory-file", td("inventory.json"), "--state-file", td("app.tfstate.json"), "--state-file", td("app-copy.tfstate.json")},
+	}
+	if err := os.WriteFile(td("app-copy.tfstate.json"), mustRead(t, td("app.tfstate.json")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(td("app-copy.tfstate.json")) })
+
+	for name, args := range scenarios {
+		t.Run(name, func(t *testing.T) {
+			_, out, stderr := oos(t, append(args, "--format", "json")...)
+			doc, err := jsonschema.UnmarshalJSON(strings.NewReader(out))
+			if err != nil {
+				t.Fatalf("%v; stderr: %s", err, stderr)
+			}
+			if err := schema.Validate(doc); err != nil {
+				t.Errorf("report does not match schema: %v", err)
+			}
+		})
+	}
+}
+
+func mustRead(t *testing.T, path string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+type summaryReport struct {
+	Scan struct {
+		Complete          bool `json:"complete"`
+		StateComplete     bool `json:"state_complete"`
+		DiscoveryComplete bool `json:"discovery_complete"`
+	} `json:"scan"`
+	Regions []struct {
+		Status        string `json:"status"`
+		ErrorCategory string `json:"error_category"`
+		Error         string `json:"error"`
+	} `json:"regions"`
+	Findings []struct {
+		Identifier string `json:"identifier"`
+		Status     string `json:"status"`
+	} `json:"findings"`
+}
+
+func jsonReport(t *testing.T, args ...string) (int, summaryReport) {
+	t.Helper()
+	code, out, stderr := oos(t, append(args, "--format", "json")...)
+	var r summaryReport
+	if err := json.Unmarshal([]byte(out), &r); err != nil {
+		t.Fatalf("%v; stderr: %s", err, stderr)
+	}
+	return code, r
+}
+
+func statuses(r summaryReport) map[string]string {
+	m := map[string]string{}
+	for _, f := range r.Findings {
+		m[f.Identifier] = f.Status
+	}
+	return m
+}
+
+func TestFailedRegionKeepsNoMatchFromOtherRegions(t *testing.T) {
+	code, r := jsonReport(t, "--inventory-file", td("inventory_region_failed.json"),
+		"--state-file", td("app.tfstate.json"), "--state-file", td("shared.tfstate.json"))
+	if code != scan.ExitPartial {
+		t.Errorf("exit = %d, want %d", code, scan.ExitPartial)
+	}
+	if r.Scan.Complete || !r.Scan.StateComplete || r.Scan.DiscoveryComplete {
+		t.Errorf("scan = %+v", r.Scan)
+	}
+	if got := statuses(r)["analytics-db"]; got != "no_match" {
+		t.Errorf("analytics-db = %s, want no_match (a failed region must not change other findings)", got)
+	}
+}
+
+func TestPartialSourceKeepsValidMatches(t *testing.T) {
+	code, r := jsonReport(t, "--inventory-file", td("inventory.json"), "--state-file", td("partial.tfstate.json"))
+	if code != scan.ExitPartial || r.Scan.StateComplete {
+		t.Errorf("exit = %d, scan = %+v", code, r.Scan)
+	}
+	st := statuses(r)
+	if st["orders-db"] != "tracked" || st["analytics-db"] != "unable_to_verify" {
+		t.Errorf("statuses = %v", st)
+	}
+}
+
+func TestOutputFailureBeatsPartialScan(t *testing.T) {
+	code, _, _ := oos(t, "--inventory-file", td("inventory.json"), "--state-file", td("broken.tfstate.json"),
+		"--output", filepath.Join("testdata", "no-such-dir", "x.json"))
+	if code != scan.ExitFatal {
+		t.Errorf("exit = %d, want %d", code, scan.ExitFatal)
+	}
+}
+
+func TestRegionErrorsAreFixedMessages(t *testing.T) {
+	for _, format := range []string{"text", "json"} {
+		code, out, _ := oos(t, "--format", format, "--inventory-file", td("inventory_hostile_region_error.json"),
+			"--state-file", td("app.tfstate.json"))
+		if code != scan.ExitPartial {
+			t.Errorf("%s: exit = %d", format, code)
+		}
+		for _, bad := range []string{"\x1b", "AccessDenied", "user/someone", `\u001b`} {
+			if strings.Contains(out, bad) {
+				t.Errorf("%s output contains raw region error text %q", format, bad)
+			}
+		}
+	}
+	_, r := jsonReport(t, "--inventory-file", td("inventory_hostile_region_error.json"), "--state-file", td("app.tfstate.json"))
+	failed := r.Regions[len(r.Regions)-1]
+	if failed.ErrorCategory != "api_error" || failed.Error != "the AWS API returned an error" {
+		t.Errorf("region = %+v", failed)
+	}
+}
+
+func TestSchemaRejectsBadReports(t *testing.T) {
+	schema, err := jsonschema.NewCompiler().Compile(filepath.Join("..", "..", "docs", "report.schema.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	good := string(mustRead(t, td("report.golden.json")))
+	tampered := map[string]string{
+		"unknown status":         strings.Replace(good, `"status": "no_match"`, `"status": "bogus"`, 1),
+		"unknown matched_on key": strings.Replace(good, `"matched_on": "resource_id"`, `"matched_on": "name"`, 1),
+		"wrong schema version":   strings.Replace(good, `"schema_version": 1`, `"schema_version": 2`, 1),
+		"missing required field": strings.Replace(good, `"import_id"`, `"import_identifier"`, 1),
+	}
+	for name, doc := range tampered {
+		if doc == good {
+			t.Fatalf("%s: replacement did not apply", name)
+		}
+		v, err := jsonschema.UnmarshalJSON(strings.NewReader(doc))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if schema.Validate(v) == nil {
+			t.Errorf("%s: schema accepted an invalid report", name)
+		}
 	}
 }

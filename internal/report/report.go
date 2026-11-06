@@ -42,7 +42,8 @@ type Scan struct {
 type Region struct {
 	Region        string `json:"region"`
 	Status        string `json:"status"` // ok, failed
-	Error         string `json:"error,omitempty"`
+	ErrorCategory string `json:"error_category,omitempty"`
+	Error         string `json:"error,omitempty"` // fixed message for the category
 	InstanceCount int    `json:"instance_count"`
 }
 
@@ -54,8 +55,8 @@ type Source struct {
 	Status        string    `json:"status"` // ok, partial, failed
 	ErrorCategory string    `json:"error_category,omitempty"`
 	Error         string    `json:"error,omitempty"` // fixed message for the category
-	Lineage       string    `json:"lineage,omitempty"`
-	Serial        int64     `json:"serial,omitempty"`
+	Lineage       *string   `json:"lineage"`         // null when the state could not be read
+	Serial        *int64    `json:"serial"`          // null when the state could not be read
 	IdentityCount int       `json:"identity_count"`
 	Problems      []Problem `json:"problems,omitempty"`
 	ObservedAt    time.Time `json:"observed_at"`
