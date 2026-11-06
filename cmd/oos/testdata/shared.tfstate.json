@@ -1,0 +1,34 @@
+{
+  "version": 4,
+  "terraform_version": "1.17.1",
+  "serial": 3,
+  "lineage": "shared-lineage",
+  "outputs": {
+    "pw": {
+      "value": "OOS-SECRET-MARKER",
+      "type": "string",
+      "sensitive": true
+    }
+  },
+  "resources": [
+    {
+      "mode": "managed",
+      "type": "aws_db_instance",
+      "name": "legacy",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 2,
+          "attributes": {
+            "arn": "arn:aws:rds:eu-west-1:123456789012:db:legacy-reports",
+            "id": "db-LEGACY",
+            "identifier": "legacy-reports",
+            "resource_id": "db-LEGACY",
+            "password": "OOS-SECRET-MARKER-pw"
+          },
+          "private": "OOS-SECRET-MARKER"
+        }
+      ]
+    }
+  ]
+}
