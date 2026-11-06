@@ -1,0 +1,11 @@
+{
+  "name": "oos",
+  "description": "Find AWS resources that no Terraform state tracks with the oos CLI, and bring chosen ones under Terraform with import blocks.",
+  "author": {
+    "name": "Gordon Murray"
+  },
+  "homepage": "https://github.com/gordonmurray/outofstate.dev",
+  "repository": "https://github.com/gordonmurray/outofstate.dev",
+  "license": "Apache-2.0",
+  "keywords": ["terraform", "aws", "import", "drift", "infrastructure-as-code"]
+}

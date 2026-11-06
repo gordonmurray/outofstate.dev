@@ -183,6 +183,26 @@ These are **all** RDS charges in those regions, not the cost of the import candi
 
 Terraform state contains secrets such as database passwords. `oos` reads only the resource identifiers it needs, never writes state anywhere, and never copies Terraform's own error output into a report. When a source fails, the report says why and gives the command to run yourself to see Terraform's full output.
 
+## Using oos with an AI coding agent
+
+The repository includes an [agent skill](skills/oos/SKILL.md) that teaches a coding agent how to run `oos`, read its report correctly, and help bring resources you choose under Terraform: it writes `import` blocks, drafts configuration with `terraform plan -generate-config-out`, and stops at a reviewed plan. It never runs `terraform apply`.
+
+In Claude Code, install it as a plugin:
+
+```
+/plugin marketplace add gordonmurray/outofstate.dev
+/plugin install oos@outofstate
+```
+
+Or copy the skill into your personal or project skills directory:
+
+```bash
+mkdir -p ~/.claude/skills/oos
+curl -fsSL https://raw.githubusercontent.com/gordonmurray/outofstate.dev/main/skills/oos/SKILL.md -o ~/.claude/skills/oos/SKILL.md
+```
+
+Then ask something like "what's running in this AWS account outside our Terraform?". The skill uses the Agent Skills format, so other agents that support it can use the same file.
+
 ## Contributing
 
 Bug reports and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md). To report a security problem, see [SECURITY.md](SECURITY.md).
