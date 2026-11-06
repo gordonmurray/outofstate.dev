@@ -2,7 +2,7 @@
 
 Find what's running outside your Terraform.
 
-`oos` compares the RDS DB instances in an AWS account with the Terraform states you supply, and reports the ones that no state tracks.
+`oos` compares the resources in an AWS account with the Terraform states you supply, and reports the ones that no state tracks, and what they cost. The first supported resource type is RDS DB instances. More will follow.
 
 > **Status:** early development. The current release only prints its version.
 
