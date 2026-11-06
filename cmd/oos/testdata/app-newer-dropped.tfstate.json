@@ -1,0 +1,14 @@
+{
+  "version": 4,
+  "terraform_version": "1.17.1",
+  "serial": 4,
+  "lineage": "app-lineage",
+  "outputs": {
+    "pw": {
+      "value": "OOS-SECRET-MARKER",
+      "type": "string",
+      "sensitive": true
+    }
+  },
+  "resources": []
+}

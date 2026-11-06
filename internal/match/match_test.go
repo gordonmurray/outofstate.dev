@@ -160,13 +160,13 @@ func TestRun(t *testing.T) {
 			scanWarnings: []WarningKind{WarnDuplicateSnapshot}, complete: true,
 		},
 		{
-			name:      "same lineage at different serials is one owner",
+			name:      "same lineage at different serials: only the newest is used",
 			instances: []discover.Instance{inst("orders", "db-1")},
 			sources: []Source{
 				src("./infra", "L1", 6, ident("aws_db_instance.orders", "orders", "db-1")),
 				src("old-export.json", "L1", 5, ident("aws_db_instance.orders", "orders", "db-1")),
 			},
-			status: StatusTracked, keys: []Key{KeyResourceID, KeyResourceID},
+			status: StatusTracked, keys: []Key{KeyResourceID},
 			scanWarnings: []WarningKind{WarnDivergedCopies}, complete: true,
 		},
 		{
@@ -386,5 +386,97 @@ func TestScanWarningDetails(t *testing.T) {
 	}
 	if w := byKind[WarnDivergedCopies]; !slices.Equal(w.Sources, []string{"./infra", "old.json"}) {
 		t.Errorf("diverged: %+v", w)
+	}
+}
+
+// An older snapshot of the same state must never make an instance look
+// tracked after the newer snapshot dropped it, whatever the argument order.
+func TestOlderSnapshotCannotHideACurrentGap(t *testing.T) {
+	olderTracks := src("old-export.json", "L1", 5, ident("aws_db_instance.orders", "orders", "db-1"))
+	newerDropped := src("./infra", "L1", 6)
+	tests := []struct {
+		name     string
+		sources  []Source
+		want     Status
+		diverged []string
+	}{
+		{"older only", []Source{olderTracks}, StatusTracked, nil},
+		{"newer only", []Source{newerDropped}, StatusNoMatch, nil},
+		{"both, older first", []Source{olderTracks, newerDropped}, StatusNoMatch, []string{"./infra", "old-export.json"}},
+		{"both, newer first", []Source{newerDropped, olderTracks}, StatusNoMatch, []string{"./infra", "old-export.json"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res := Run([]discover.Instance{inst("orders", "db-1")}, tt.sources)
+			if got := res.Findings[0].Status; got != tt.want {
+				t.Errorf("status = %s, want %s", got, tt.want)
+			}
+			var diverged []string
+			for _, w := range res.Warnings {
+				if w.Kind == WarnDivergedCopies {
+					diverged = w.Sources
+				}
+			}
+			if !slices.Equal(diverged, tt.diverged) {
+				t.Errorf("diverged_copies sources = %v, want %v (newest first)", diverged, tt.diverged)
+			}
+			if !res.StateComplete {
+				t.Error("an ignored older snapshot must not make the scan partial")
+			}
+		})
+	}
+}
+
+func TestIgnoredOlderPartialSnapshotDoesNotMakeScanPartial(t *testing.T) {
+	res := Run([]discover.Instance{inst("orders", "db-1")}, []Source{
+		src("./infra", "L1", 6, ident("aws_db_instance.orders", "orders", "db-1")),
+		partial(src("old.json", "L1", 5)),
+	})
+	if !res.StateComplete || res.Findings[0].Status != StatusTracked {
+		t.Errorf("%+v", res)
+	}
+	// A partial newest snapshot does make it partial.
+	res = Run([]discover.Instance{inst("orders", "db-2")}, []Source{
+		partial(src("./infra", "L1", 6)),
+		src("old.json", "L1", 5, ident("aws_db_instance.orders", "orders", "db-2")),
+	})
+	if res.StateComplete || res.Findings[0].Status != StatusUnverified {
+		t.Errorf("%+v", res)
+	}
+}
+
+func TestSnapshotSelectionEdgeCases(t *testing.T) {
+	id := ident("aws_db_instance.orders", "orders", "db-1")
+	tests := []struct {
+		name     string
+		sources  []Source
+		status   Status
+		complete bool
+		warnings []WarningKind
+	}{
+		{"older serial supplied twice: both ignored", []Source{
+			src("old1", "L1", 5, id), src("old2", "L1", 5, id), src("new", "L1", 6),
+		}, StatusNoMatch, true, []WarningKind{WarnDivergedCopies}},
+		{"newest twice plus an older copy, older first", []Source{
+			src("old", "L1", 5, id), src("new1", "L1", 6), src("new2", "L1", 6),
+		}, StatusNoMatch, true, []WarningKind{WarnDuplicateSnapshot, WarnDivergedCopies}},
+		{"newest twice plus an older copy, newest first", []Source{
+			src("new1", "L1", 6), src("old", "L1", 5, id), src("new2", "L1", 6),
+		}, StatusNoMatch, true, []WarningKind{WarnDuplicateSnapshot, WarnDivergedCopies}},
+		{"identical newest copies, partial one first: the full one is used", []Source{
+			partial(src("new-partial", "L1", 6)), src("new-ok", "L1", 6),
+		}, StatusNoMatch, true, []WarningKind{WarnDuplicateSnapshot}},
+		{"identical newest copies, full one first", []Source{
+			src("new-ok", "L1", 6), partial(src("new-partial", "L1", 6)),
+		}, StatusNoMatch, true, []WarningKind{WarnDuplicateSnapshot}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res := Run([]discover.Instance{inst("orders", "db-1")}, tt.sources)
+			if res.Findings[0].Status != tt.status || res.StateComplete != tt.complete {
+				t.Errorf("status=%s complete=%v", res.Findings[0].Status, res.StateComplete)
+			}
+			checkWarnings(t, "scan", res.Warnings, tt.warnings)
+		})
 	}
 }

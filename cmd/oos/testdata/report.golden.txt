@@ -5,14 +5,14 @@ Scan: complete
 
 1 import candidate(s): RDS instances with no match in the supplied states
 
-  analytics-db             db.r6g.large     postgres 16.2    available    created 2025-03-02
+  analytics-db             eu-west-1       db.r6g.large     postgres 16.2    available    created 2025-03-02
 
 2 tracked in state
-  legacy-reports           testdata/shared.tfstate.json (unknown) aws_db_instance.legacy (resource_id)
-  orders-db                testdata/app.tfstate.json (unknown) aws_db_instance.orders (resource_id)
+  legacy-reports           eu-west-1       testdata/shared.tfstate.json (unknown) aws_db_instance.legacy (resource_id)
+  orders-db                eu-west-1       testdata/app.tfstate.json (unknown) aws_db_instance.orders (resource_id)
 
 1 not covered
-  billing-cluster-1        member of an Aurora or Multi-AZ DB cluster
+  billing-cluster-1        eu-west-1       member of an Aurora or Multi-AZ DB cluster
 
 Import candidates need a configuration review and a terraform plan before applying.
 Use --format json for full details (ARNs, resource and import IDs, tags).

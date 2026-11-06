@@ -75,7 +75,7 @@ const (
 	WarnStaleStateEntry   WarningKind = "stale_state_entry"  // same ARN, different resource ID
 	// Per scan.
 	WarnDuplicateSnapshot WarningKind = "duplicate_snapshot" // same lineage and serial supplied twice
-	WarnDivergedCopies    WarningKind = "diverged_copies"    // same lineage, different serial
+	WarnDivergedCopies    WarningKind = "diverged_copies"    // same lineage, different serial: first source (newest) used, the rest ignored
 )
 
 // Warning carries the sources and addresses involved, never state values.
@@ -97,7 +97,8 @@ type Finding struct {
 type Result struct {
 	Findings []Finding
 	Warnings []Warning
-	// StateComplete is true when every source loaded and parsed fully.
+	// StateComplete is true when no source failed and every snapshot used
+	// for matching parsed fully. Ignored older snapshots do not count.
 	StateComplete bool
 }
 
@@ -110,15 +111,22 @@ type keptSource struct {
 
 // Run matches instances against sources.
 func Run(instances []discover.Instance, sources []Source) Result {
-	res := Result{StateComplete: true}
+	kept, warnings := dedupe(sources)
+	res := Result{StateComplete: true, Warnings: warnings}
+
+	// Completeness counts every failed source (its lineage is unknown, so it
+	// cannot be ruled out) and every source used for matching. An older
+	// snapshot that was ignored does not count.
 	for _, s := range sources {
-		if s.Status != SourceOK || s.State == nil {
+		if s.State == nil || s.Status == SourceFailed {
 			res.StateComplete = false
 		}
 	}
-
-	kept, warnings := dedupe(sources)
-	res.Warnings = warnings
+	for _, k := range kept {
+		if k.Status != SourceOK {
+			res.StateComplete = false
+		}
+	}
 
 	for _, inst := range instances {
 		res.Findings = append(res.Findings, matchInstance(inst, kept, res.StateComplete))
@@ -126,54 +134,69 @@ func Run(instances []discover.Instance, sources []Source) Result {
 	return res
 }
 
-// dedupe drops the second and later copies of an identical snapshot (same
-// non-empty lineage and serial) and reports same-lineage snapshots with
-// different serials. States without a lineage are never merged.
+// dedupe decides which snapshots take part in matching:
+//
+//   - for each lineage (one Terraform state over time) only the newest
+//     snapshot (highest serial) is used. An older export must never make an
+//     instance look tracked after the current state dropped it. The skipped
+//     snapshots are reported in a diverged_copies warning, newest first;
+//   - the same lineage and serial supplied twice is counted once
+//     (duplicate_snapshot), keeping the copy that parsed best. Copies of an
+//     older serial are only listed in diverged_copies;
+//   - states without a lineage are never merged with anything.
 func dedupe(sources []Source) ([]keptSource, []Warning) {
-	type snap struct {
-		lineage string
-		serial  int64
+	newest := map[string]int64{} // lineage -> highest serial
+	for _, s := range sources {
+		if s.State == nil || s.State.Lineage == "" {
+			continue
+		}
+		if cur, ok := newest[s.State.Lineage]; !ok || s.State.Serial > cur {
+			newest[s.State.Lineage] = s.State.Serial
+		}
 	}
+
 	var (
 		kept       []keptSource
 		warnings   []Warning
-		firstSnap  = map[snap]string{}
-		bySerial   = map[string]map[int64][]string{} // lineage -> serial -> sources
+		usedName   = map[string]string{}   // lineage -> source used
+		older      = map[string][]string{} // lineage -> ignored older sources
 		lineageOrd []string
 	)
 	for i, s := range sources {
 		if s.State == nil {
 			continue
 		}
-		owner := s.State.Lineage
-		if owner == "" {
+		lin := s.State.Lineage
+		if lin == "" {
 			kept = append(kept, keptSource{Source: s, owner: "\x00source-" + strconv.Itoa(i)})
 			continue
 		}
-		key := snap{owner, s.State.Serial}
-		if first, dup := firstSnap[key]; dup {
-			warnings = append(warnings, Warning{Kind: WarnDuplicateSnapshot, Sources: []string{first, s.Name}})
-			continue
+		if _, seen := usedName[lin]; !seen && older[lin] == nil {
+			lineageOrd = append(lineageOrd, lin)
 		}
-		firstSnap[key] = s.Name
-		if bySerial[owner] == nil {
-			bySerial[owner] = map[int64][]string{}
-			lineageOrd = append(lineageOrd, owner)
+		switch {
+		case s.State.Serial < newest[lin]:
+			older[lin] = append(older[lin], s.Name)
+		case usedName[lin] != "":
+			// The same snapshot again. Keep the copy that parsed best, so the
+			// result does not depend on argument order.
+			prev := usedName[lin]
+			for k := range kept {
+				if kept[k].owner == lin && rank(s.Status) < rank(kept[k].Status) {
+					kept[k].Source = s
+					usedName[lin] = s.Name
+				}
+			}
+			warnings = append(warnings, Warning{Kind: WarnDuplicateSnapshot, Sources: []string{prev, s.Name}})
+		default:
+			usedName[lin] = s.Name
+			kept = append(kept, keptSource{Source: s, owner: lin})
 		}
-		bySerial[owner][s.State.Serial] = append(bySerial[owner][s.State.Serial], s.Name)
-		kept = append(kept, keptSource{Source: s, owner: owner})
 	}
 	for _, lin := range lineageOrd {
-		if len(bySerial[lin]) < 2 {
-			continue
+		if len(older[lin]) > 0 {
+			warnings = append(warnings, Warning{Kind: WarnDivergedCopies, Sources: append([]string{usedName[lin]}, older[lin]...)})
 		}
-		var names []string
-		for _, s := range kept {
-			if s.owner == lin {
-				names = append(names, s.Name)
-			}
-		}
-		warnings = append(warnings, Warning{Kind: WarnDivergedCopies, Sources: names})
 	}
 	return kept, warnings
 }
@@ -263,4 +286,16 @@ func compare(inst discover.Instance, id tfstate.Identity) (key Key, renamed, sta
 		return KeyIdentifier, false, false
 	}
 	return "", false, false
+}
+
+// rank orders source statuses from best to worst.
+func rank(s SourceStatus) int {
+	switch s {
+	case SourceOK:
+		return 0
+	case SourcePartial:
+		return 1
+	default:
+		return 2
+	}
 }
