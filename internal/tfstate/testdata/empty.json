@@ -1,0 +1,15 @@
+{
+  "version": 4,
+  "terraform_version": "1.17.1",
+  "serial": 7,
+  "lineage": "11111111-1111-1111-1111-111111111111",
+  "outputs": {
+    "db_password": {
+      "value": "OOS-SECRET-MARKER-output",
+      "type": "string",
+      "sensitive": true
+    }
+  },
+  "resources": [],
+  "check_results": null
+}

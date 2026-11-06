@@ -1,0 +1,50 @@
+{
+  "version": 4,
+  "terraform_version": "1.17.1",
+  "serial": 7,
+  "lineage": "11111111-1111-1111-1111-111111111111",
+  "outputs": {
+    "db_password": {
+      "value": "OOS-SECRET-MARKER-output",
+      "type": "string",
+      "sensitive": true
+    }
+  },
+  "resources": [
+    {
+      "mode": "managed",
+      "type": "aws_db_instance",
+      "name": "reports",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 1,
+          "attributes": {
+            "arn": "arn:aws:rds:eu-west-1:123456789012:db:db-reports",
+            "identifier": "db-reports",
+            "engine": "postgres",
+            "instance_class": "db.t4g.micro",
+            "password": "OOS-SECRET-MARKER-password",
+            "username": "admin",
+            "master_user_secret": [
+              {
+                "secret_arn": "OOS-SECRET-MARKER-secret-arn"
+              }
+            ],
+            "id": "db-reports"
+          },
+          "sensitive_attributes": [
+            [
+              {
+                "type": "get_attr",
+                "value": "password"
+              }
+            ]
+          ],
+          "private": "OOS-SECRET-MARKER-private"
+        }
+      ]
+    }
+  ],
+  "check_results": null
+}
