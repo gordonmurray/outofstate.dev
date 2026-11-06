@@ -50,10 +50,10 @@ oos --profile default
 # Several working directories, for example an app and a shared infrastructure repo
 oos --profile default --source ./app-infra --source ./shared-infra
 
-# Save the report for later, or for an AI coding agent to read
+# Save the report for later
 oos --profile default --source ./app-infra --source ./shared-infra --output outofstate.txt
 
-# JSON, for scripts and agents (schema: docs/report.schema.json)
+# JSON, with full details for scripts and AI coding agents (schema: docs/report.schema.json)
 oos --profile default --source ./app-infra --format json --output outofstate.json
 ```
 
