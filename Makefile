@@ -19,7 +19,7 @@ RUN := docker run --rm --init $(TTY) \
 	$(TOOLS_IMAGE)
 
 .DEFAULT_GOAL := help
-.PHONY: help tools volumes test lint fmt vuln build snapshot release release-check tidy check-versions ci e2e shell clean
+.PHONY: help tools volumes test lint fmt vuln build snapshot release release-check tidy check-versions ci e2e e2e-image e2e-selftest shell clean
 
 help: ## Show targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-15s %s\n", $$1, $$2}'
@@ -70,14 +70,22 @@ check-versions: volumes ## Go in the tools image must match go.mod and tools/Doc
 	echo "go.mod toolchain: $$want | tools/Dockerfile: $$pin | tools image: $$have"; \
 	[ "$$want" = "$$have" ] && [ "$$have" = "$$pin" ] || { echo "Go versions disagree" >&2; exit 1; }
 
-ci: check-versions lint test vuln build release-check ## Everything CI runs
+ci: check-versions lint test vuln build release-check e2e-selftest ## Everything CI runs
+
+e2e-image:
+	@docker build -q --target e2e -t oos-e2e:local -f tools/Dockerfile tools >/dev/null
+
+e2e-selftest: e2e-image ## Check the e2e script's safety rules with fake aws/terraform (no AWS)
+	docker run --rm --init --user $(UID):$(GID) -e HOME=/tmp -v "$(CURDIR)/test/e2e":/e2e:ro \
+		--entrypoint bash oos-e2e:local /e2e/selftest.sh
 
 # Real AWS, real money: needs AWS_PROFILE, AWS_REGION and E2E_CONFIRM=yes.
-e2e: build ## End-to-end test in a sandbox AWS account (creates billable RDS instances)
-	@docker build -q --target e2e -t oos-e2e:local -f tools/Dockerfile tools >/dev/null
-	docker run --rm --init $(TTY) \
-		-v "$(HOME)/.aws":/root/.aws:ro \
+e2e: build e2e-image ## End-to-end test in a sandbox AWS account (creates billable RDS instances)
+	@mkdir -p test/e2e/artifacts
+	docker run --rm --init $(TTY) --user $(UID):$(GID) \
+		-e HOME=/tmp/home -v "$(HOME)/.aws":/tmp/home/.aws:ro \
 		-v "$(CURDIR)/test/e2e":/e2e:ro \
+		-v "$(CURDIR)/test/e2e/artifacts":/artifacts \
 		-v "$(CURDIR)/dist":/oos:ro \
 		-e AWS_PROFILE -e AWS_REGION -e E2E_CONFIRM -e RUN_ID \
 		--entrypoint bash oos-e2e:local /e2e/run.sh

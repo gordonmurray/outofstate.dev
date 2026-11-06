@@ -3,11 +3,25 @@
 #
 # Creates three db.t4g.micro RDS instances (billable), untracks one, checks
 # oos reports exactly that one, imports it back, checks oos is clean, and
-# always destroys everything, even when a step fails.
+# destroys everything.
 #
-# Runs inside the e2e image (make e2e). Needs AWS_PROFILE and AWS_REGION, and
-# E2E_CONFIRM=yes. The account and region must have no other RDS instances.
+# Safety rules:
+#   - nothing is created unless E2E_CONFIRM=yes and the region has no RDS
+#     instances at all;
+#   - cleanup only touches instances whose identifier starts with
+#     "oos-e2e-<run id>-" AND carry the tag oos-e2e=<run id>;
+#   - the run id is validated, and is never interpolated into a query;
+#   - both applies always finish before teardown, and INT/TERM are handled;
+#   - PASS is printed only if the test passed and cleanup verified that no
+#     instance from this run remains. If cleanup fails, the exit code is
+#     non-zero and Terraform state is copied to $ARTIFACTS for recovery.
+#
+# Needs AWS_PROFILE and AWS_REGION. Paths can be overridden for the self-test.
 set -euo pipefail
+
+OOS_BIN="${OOS_BIN:-/oos/oos}"
+E2E_DIR="${E2E_DIR:-/e2e}"
+ARTIFACTS="${ARTIFACTS:-/artifacts}"
 
 : "${AWS_PROFILE:?set AWS_PROFILE}"
 : "${AWS_REGION:?set AWS_REGION}"
@@ -18,79 +32,153 @@ if [ "${E2E_CONFIRM:-}" != "yes" ]; then
 fi
 
 run_id="${RUN_ID:-$(date +%Y%m%d%H%M%S)}"
-oos=/oos/oos
+if ! [[ "$run_id" =~ ^[a-z0-9]{1,20}$ ]]; then
+  echo "RUN_ID must be 1-20 lowercase letters or digits" >&2
+  exit 2
+fi
+prefix="oos-e2e-${run_id}-"
+
 work="$(mktemp -d)"
-cp -r /e2e/project-a /e2e/project-b "$work/"
+cp -r "$E2E_DIR/project-a" "$E2E_DIR/project-b" "$work/"
 a="$work/project-a"
 b="$work/project-b"
 export TF_VAR_run_id="$run_id" TF_IN_AUTOMATION=1 TF_INPUT=0
 
+aws_cleanup=0 # armed only after preflight
+apply_pids=()
+
 log() { printf '\n== %s\n' "$*"; }
-fail() { echo "FAIL: $*" >&2; exit 1; }
+fail() {
+  echo "FAIL: $*" >&2
+  exit 1
+}
+
+# run_instances lists identifiers of instances that belong to this run:
+# both the identifier prefix and the exact tag must match.
+run_instances() {
+  aws rds describe-db-instances --output json |
+    jq -r --arg id "$run_id" --arg prefix "$prefix" '
+      .DBInstances[]
+      | select(.DBInstanceIdentifier | startswith($prefix))
+      | select(any(.TagList[]?; .Key == "oos-e2e" and .Value == $id))
+      | .DBInstanceIdentifier'
+}
+
+settle_applies() {
+  local pid
+  for pid in "${apply_pids[@]}"; do
+    if kill -0 "$pid" 2>/dev/null; then
+      # SIGTERM, not SIGINT: background jobs of a non-interactive shell
+      # ignore SIGINT. Terraform treats both as a graceful interrupt and
+      # releases its state lock.
+      kill -TERM "$pid" 2>/dev/null || true
+    fi
+  done
+  for pid in "${apply_pids[@]}"; do
+    wait "$pid" 2>/dev/null || true
+  done
+  apply_pids=()
+}
 
 cleanup() {
-  local status=$?
-  log "cleanup (run ${run_id})"
-  terraform -chdir="$a" destroy -auto-approve >/dev/null 2>&1 || true
-  terraform -chdir="$b" destroy -auto-approve >/dev/null 2>&1 || true
-  # Anything still tagged with this run (for example b2 if the import failed).
-  for id in $(aws rds describe-db-instances --query "DBInstances[?TagList[?Key=='oos-e2e' && Value=='${run_id}']].DBInstanceIdentifier" --output text); do
-    echo "deleting leftover ${id}"
-    aws rds delete-db-instance --db-instance-identifier "$id" --skip-final-snapshot >/dev/null || true
-  done
-  for id in $(aws rds describe-db-instances --query "DBInstances[?TagList[?Key=='oos-e2e' && Value=='${run_id}']].DBInstanceIdentifier" --output text); do
-    aws rds wait db-instance-deleted --db-instance-identifier "$id" || true
-  done
+  local status=$? cleanup_ok=1 id left
+  trap - EXIT INT TERM
+  set +e
+  settle_applies
+  if [ "$aws_cleanup" -eq 1 ]; then
+    log "cleanup (run ${run_id})"
+    terraform -chdir="$a" destroy -auto-approve >/dev/null 2>&1 || echo "destroy A failed; falling back to tag cleanup" >&2
+    terraform -chdir="$b" destroy -auto-approve >/dev/null 2>&1 || echo "destroy B failed; falling back to tag cleanup" >&2
+    left=$(run_instances) || cleanup_ok=0
+    for id in $left; do
+      echo "deleting leftover ${id}"
+      aws rds delete-db-instance --db-instance-identifier "$id" --skip-final-snapshot >/dev/null || cleanup_ok=0
+    done
+    for id in $left; do
+      aws rds wait db-instance-deleted --db-instance-identifier "$id" || cleanup_ok=0
+    done
+    left=$(run_instances) || cleanup_ok=0
+    if [ -n "$left" ]; then
+      echo "instances from this run still exist: ${left}" >&2
+      cleanup_ok=0
+    fi
+    if [ "$cleanup_ok" -ne 1 ]; then
+      mkdir -p "$ARTIFACTS/$run_id"
+      cp -r "$a" "$b" "$ARTIFACTS/$run_id/" 2>/dev/null
+      echo "CLEANUP FAILED. Terraform state saved to ${ARTIFACTS}/${run_id}. Delete instances starting with ${prefix} by hand." >&2
+    fi
+  fi
   rm -rf "$work"
-  if [ "$status" -eq 0 ]; then echo "PASS"; fi
+  if [ "$cleanup_ok" -ne 1 ]; then
+    exit 3
+  fi
+  if [ "$status" -eq 0 ]; then
+    echo "PASS"
+  fi
   exit "$status"
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # Run oos, keep the JSON report, and check the exit code.
 run_oos() {
-  local want=$1; shift
-  set +e
-  "$oos" --region "$AWS_REGION" --format json --output "$work/report.json" "$@"
-  local got=$?
-  set -e
+  local want=$1 got=0
+  shift
+  "$OOS_BIN" --region "$AWS_REGION" --format json --output "$work/report.json" "$@" || got=$?
   [ "$got" -eq "$want" ] || fail "oos exit code ${got}, want ${want} (args: $*)"
+  [ -s "$work/report.json" ] || fail "no JSON report written"
 }
 
 unmatched() { jq -r '[.findings[] | select(.status=="no_match") | .identifier] | sort | join(",")' "$work/report.json"; }
 
-log "checking the region has no other RDS instances"
-existing=$(aws rds describe-db-instances --query 'length(DBInstances)' --output text)
+log "checking the region has no RDS instances"
+existing=$(aws rds describe-db-instances --output json | jq '.DBInstances | length')
 [ "$existing" = "0" ] || fail "${existing} RDS instance(s) already exist in ${AWS_REGION}; use an empty sandbox region"
 
 log "creating instances (run ${run_id})"
+aws_cleanup=1
 terraform -chdir="$a" init -input=false >/dev/null
 terraform -chdir="$b" init -input=false >/dev/null
 terraform -chdir="$a" apply -auto-approve >/dev/null &
-pid_a=$!
+apply_pids+=($!)
 terraform -chdir="$b" apply -auto-approve >/dev/null &
-pid_b=$!
-wait "$pid_a" || fail "apply A"
-wait "$pid_b" || fail "apply B"
+apply_pids+=($!)
+apply_a=0 apply_b=0
+wait "${apply_pids[0]}" || apply_a=$?
+wait "${apply_pids[1]}" || apply_b=$?
+apply_pids=()
+[ "$apply_a" -eq 0 ] || fail "apply A (exit ${apply_a})"
+[ "$apply_b" -eq 0 ] || fail "apply B (exit ${apply_b})"
 
 log "untracking b2"
 terraform -chdir="$b" state rm aws_db_instance.b2 >/dev/null
 
 log "oos with A and B: expect only b2 unmatched, exit 2"
 run_oos 2 --source "$a" --source "$b"
-[ "$(unmatched)" = "oos-e2e-${run_id}-b2" ] || fail "unmatched = $(unmatched)"
+[ "$(unmatched)" = "${prefix}b2" ] || fail "unmatched = $(unmatched)"
 
 log "oos with A only: expect b1 and b2 unmatched"
 run_oos 2 --source "$a"
-[ "$(unmatched)" = "oos-e2e-${run_id}-b1,oos-e2e-${run_id}-b2" ] || fail "unmatched = $(unmatched)"
+[ "$(unmatched)" = "${prefix}b1,${prefix}b2" ] || fail "unmatched = $(unmatched)"
 
-log "secrets: the database password must not appear in any report"
-password=$(terraform -chdir="$a" state pull | jq -r '.resources[] | select(.type=="random_password") | .instances[0].attributes.result')
-"$oos" --region "$AWS_REGION" --source "$a" --source "$b" --output "$work/report.txt" || true
-if grep -qF "$password" "$work/report.json" "$work/report.txt"; then fail "password found in a report"; fi
+log "secrets: neither database password may appear in any report"
+"$OOS_BIN" --region "$AWS_REGION" --source "$a" --source "$b" --output "$work/report.txt" || true
+[ -s "$work/report.txt" ] || fail "no text report written"
+for project in "$a" "$b"; do
+  password=$(terraform -chdir="$project" state pull | jq -r '.resources[] | select(.type=="random_password") | .instances[0].attributes.result')
+  [ -n "$password" ] && [ "$password" != "null" ] || fail "could not read the test password from ${project}"
+  found=0
+  grep -qF -- "$password" "$work/report.json" "$work/report.txt" || found=$?
+  case "$found" in
+    0) fail "a password from ${project} appeared in a report" ;;
+    1) ;;
+    *) fail "grep failed while checking reports" ;;
+  esac
+done
 
 log "importing b2 back"
-terraform -chdir="$b" import aws_db_instance.b2 "oos-e2e-${run_id}-b2" >/dev/null
+terraform -chdir="$b" import aws_db_instance.b2 "${prefix}b2" >/dev/null
 
 log "oos with A and B: expect everything tracked, exit 0"
 run_oos 0 --source "$a" --source "$b"
