@@ -10,19 +10,13 @@ Find what's running outside your Terraform.
 
 ## Quick start
 
-Install the latest release (Linux, amd64 or arm64) into `~/.local/bin`.
-
-While the repository is private, use the [GitHub CLI](https://cli.github.com/), logged in with `gh auth login`:
-
-```bash
-gh api -H "Accept: application/vnd.github.raw" "repos/gordonmurray/outofstate.dev/contents/scripts/install.sh?ref=main" | bash
-```
-
-Once the repository is public, plain `curl` works too:
+Install the latest release (Linux, amd64 or arm64) into `~/.local/bin`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gordonmurray/outofstate.dev/main/scripts/install.sh | bash
 ```
+
+If you prefer to read the script first, download it, check it, then run it with `bash install.sh`. With the [GitHub CLI](https://cli.github.com/) logged in, the script downloads through `gh` instead of `curl`.
 
 Then check it. If `~/.local/bin` is not on your `PATH` yet, the installer says so. Add it with `export PATH="$HOME/.local/bin:$PATH"` (and to your shell profile).
 
@@ -133,6 +127,10 @@ These are **all** RDS charges in those regions, not the cost of the import candi
 
 Terraform state contains secrets such as database passwords. `oos` reads only the resource identifiers it needs, never writes state anywhere, and never copies Terraform's own error output into a report. When a source fails, the report says why and gives the command to run yourself to see Terraform's full output.
 
+## Contributing
+
+Bug reports and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md). To report a security problem, see [SECURITY.md](SECURITY.md).
+
 ## Development
 
 Everything runs in Docker. You need Docker, `make`, `git` and `gh`. No local Go install.
@@ -149,7 +147,9 @@ Tool versions (Go, golangci-lint, GoReleaser, Terraform) are pinned in [`tools/D
 
 ### End-to-end test
 
-`make e2e` runs the full loop against a real AWS sandbox account: it creates three `db.t4g.micro` instances with Terraform, removes one from state, checks `oos` reports exactly that one, imports it back, checks `oos` is clean, and always destroys everything. It costs a little money, so it needs explicit confirmation and an otherwise empty region:
+`make e2e` runs the full loop against a real AWS sandbox account: it creates three `db.t4g.micro` instances with Terraform, removes one from state, checks `oos` reports exactly that one, imports it back, checks `oos` is clean, and destroys everything it created. It costs a little money, so it needs explicit confirmation and an otherwise empty region.
+
+Cleanup only deletes instances that carry both the run's name prefix and its tag, and it checks that none remain. If cleanup fails (for example an AWS error or the run being killed), the script exits with code 3 and keeps the Terraform state in `test/e2e/artifacts/<run id>/`. In that case, check the region for `oos-e2e-` instances and delete them, because they keep costing money until you do.
 
 ```bash
 AWS_PROFILE=sandbox AWS_REGION=eu-west-1 E2E_CONFIRM=yes make e2e

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# End-to-end test for oos against a real AWS sandbox account (PLAN.md §10).
+# End-to-end test for oos against a real AWS sandbox account.
 #
 # Creates three db.t4g.micro RDS instances (billable), untracks one, checks
 # oos reports exactly that one, imports it back, checks oos is clean, and

@@ -18,7 +18,7 @@ import (
 	"github.com/gordonmurray/outofstate.dev/internal/tfstate"
 )
 
-// Exit codes (PLAN.md §3), evaluated in this order: 1, 3, 2, 0.
+// Exit codes, evaluated in this order: 1, 3, 2, 0.
 const (
 	ExitOK      = 0
 	ExitFatal   = 1
@@ -227,7 +227,7 @@ func Run(in Input) *report.Report {
 	return r
 }
 
-// ExitCode applies PLAN.md §3 to a completed report. Code 1 (fatal) is
+// ExitCode applies the exit-code rules to a completed report. Code 1 (fatal) is
 // decided by the caller when no report could be produced or written.
 func ExitCode(r *report.Report) int {
 	switch {

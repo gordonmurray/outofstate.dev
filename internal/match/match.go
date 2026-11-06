@@ -32,7 +32,7 @@ type Source struct {
 // Status of one instance.
 type Status string
 
-// Instance statuses (PLAN.md §4).
+// Instance statuses.
 const (
 	StatusTracked    Status = "tracked"
 	StatusNoMatch    Status = "no_match"
@@ -239,7 +239,7 @@ func matchInstance(inst discover.Instance, sources []keptSource, stateComplete b
 	return f
 }
 
-// compare applies PLAN.md §6. When both sides have a resource ID, only the
+// compare decides whether a state entry tracks an instance. When both sides have a resource ID, only the
 // resource ID decides; a different resource ID with the same ARN is a stale
 // state entry (the database was recreated) and never falls back to ARN or
 // name. Fallback is allowed only when the state entry has no resource ID:
