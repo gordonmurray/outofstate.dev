@@ -5,12 +5,16 @@ on:
     tags: ["v*"]
 
 permissions:
-  contents: write # create the GitHub Release and upload assets
+  contents: read
 
 jobs:
   release:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    permissions:
+      contents: write     # create the GitHub Release and upload assets
+      id-token: write     # sign build provenance with the workflow's identity
+      attestations: write # store the provenance attestations
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -24,3 +28,50 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: make release
+
+      # Signed SLSA build provenance for every published file. Verify with:
+      #   gh attestation verify <file> --repo gordonmurray/outofstate.dev
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/checksums.txt
+
+  # Install the release just published, the way users do, on each platform:
+  # with gh (checksum and build provenance) and with plain curl (checksum).
+  verify:
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, macos-26, macos-15-intel]
+    name: verify install (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      attestations: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install with gh (verifies build provenance)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if ! out="$(bash scripts/install.sh --version "$TAG" --dest "$RUNNER_TEMP/gh-bin" 2>&1)"; then
+            echo "$out"
+            exit 1
+          fi
+          echo "$out"
+          grep -q "build provenance verified" <<<"$out"
+          "$RUNNER_TEMP/gh-bin/oos" --version | grep -q "${TAG#v}"
+      - name: Install with curl only
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          # No GH_TOKEN, so gh is not logged in and the script uses curl.
+          bash scripts/install.sh --version "$TAG" --dest "$RUNNER_TEMP/curl-bin"
+          "$RUNNER_TEMP/curl-bin/oos" --version | grep -q "${TAG#v}"

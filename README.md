@@ -10,13 +10,13 @@ Find what's running outside your Terraform.
 
 ## Quick start
 
-Install the latest release (Linux, amd64 or arm64) into `~/.local/bin`:
+Install the latest release into `~/.local/bin`. Builds are available for Linux and macOS, on Intel/AMD and ARM (Apple Silicon):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gordonmurray/outofstate.dev/main/scripts/install.sh | bash
 ```
 
-If you prefer to read the script first, download it, check it, then run it with `bash install.sh`. With the [GitHub CLI](https://cli.github.com/) logged in, the script downloads through `gh` instead of `curl`.
+If you prefer to read the script first, download it, check it, then run it with `bash install.sh`. With the [GitHub CLI](https://cli.github.com/) logged in, the script downloads through `gh` instead of `curl` and also verifies the release's build provenance (see below).
 
 Then check it. If `~/.local/bin` is not on your `PATH` yet, the installer says so. Add it with `export PATH="$HOME/.local/bin:$PATH"` (and to your shell profile).
 
@@ -32,6 +32,16 @@ To install a specific release, pass options after `bash -s --`:
 ```
 
 The script downloads the release into a fresh temporary directory, verifies its SHA-256 checksum, and only then installs `oos`. From a clone of the repository you can also run `scripts/install.sh` directly.
+
+### Verifying a download
+
+Every release from v0.5.0 on is built by GitHub Actions from a tagged commit, and each archive carries a signed [build provenance attestation](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations). To check that an archive you downloaded was built by this repository's release workflow:
+
+```bash
+gh attestation verify oos_0.5.0_darwin_arm64.tar.gz --repo gordonmurray/outofstate.dev
+```
+
+The install script does this automatically when the GitHub CLI is logged in.
 
 ## Usage
 
@@ -164,4 +174,4 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The `Release` workflow tests the tag, builds the binaries with GoReleaser and publishes a GitHub Release.
+The `Release` workflow tests the tag, builds Linux and macOS binaries with GoReleaser, publishes a GitHub Release with build provenance attestations, then installs the release on Linux and macOS (Apple Silicon and Intel) to check it.
