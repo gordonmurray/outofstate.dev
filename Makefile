@@ -18,7 +18,7 @@ RUN := docker run --rm $(TTY) \
 	$(TOOLS_IMAGE)
 
 .DEFAULT_GOAL := help
-.PHONY: help tools volumes test lint vuln build snapshot release release-check tidy check-versions ci shell clean
+.PHONY: help tools volumes test lint fmt vuln build snapshot release release-check tidy check-versions ci shell clean
 
 help: ## Show targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-15s %s\n", $$1, $$2}'
@@ -37,6 +37,9 @@ test: volumes ## Run tests with the race detector
 
 lint: volumes ## go vet and golangci-lint
 	$(RUN) sh -c 'go vet ./... && golangci-lint run ./...'
+
+fmt: volumes ## Format code (gofmt + goimports, as configured for golangci-lint)
+	$(RUN) golangci-lint fmt ./...
 
 vuln: volumes ## Check dependencies for known vulnerabilities
 	$(RUN) go tool govulncheck ./...

@@ -15,6 +15,11 @@ linters:
     - revive
     - unconvert
     - unparam
+  exclusions:
+    rules:
+      # Tests read fixtures from testdata/ by variable path.
+      - path: _test\.go
+        linters: [gosec]
   settings:
     misspell:
       locale: UK

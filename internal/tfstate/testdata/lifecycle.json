@@ -1,0 +1,115 @@
+{
+  "version": 4,
+  "terraform_version": "1.17.1",
+  "serial": 7,
+  "lineage": "11111111-1111-1111-1111-111111111111",
+  "outputs": {
+    "db_password": {
+      "value": "OOS-SECRET-MARKER-output",
+      "type": "string",
+      "sensitive": true
+    }
+  },
+  "resources": [
+    {
+      "mode": "managed",
+      "type": "aws_db_instance",
+      "name": "tainted",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 2,
+          "attributes": {
+            "arn": "arn:aws:rds:eu-west-1:123456789012:db:t1",
+            "identifier": "t1",
+            "resource_id": "db-T1",
+            "engine": "postgres",
+            "instance_class": "db.t4g.micro",
+            "password": "OOS-SECRET-MARKER-password",
+            "username": "admin",
+            "master_user_secret": [
+              {
+                "secret_arn": "OOS-SECRET-MARKER-secret-arn"
+              }
+            ],
+            "id": "db-T1"
+          },
+          "sensitive_attributes": [
+            [
+              {
+                "type": "get_attr",
+                "value": "password"
+              }
+            ]
+          ],
+          "private": "OOS-SECRET-MARKER-private",
+          "status": "tainted"
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_db_instance",
+      "name": "cbd",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 2,
+          "attributes": {
+            "arn": "arn:aws:rds:eu-west-1:123456789012:db:new",
+            "identifier": "new",
+            "resource_id": "db-NEW",
+            "engine": "postgres",
+            "instance_class": "db.t4g.micro",
+            "password": "OOS-SECRET-MARKER-password",
+            "username": "admin",
+            "master_user_secret": [
+              {
+                "secret_arn": "OOS-SECRET-MARKER-secret-arn"
+              }
+            ],
+            "id": "db-NEW"
+          },
+          "sensitive_attributes": [
+            [
+              {
+                "type": "get_attr",
+                "value": "password"
+              }
+            ]
+          ],
+          "private": "OOS-SECRET-MARKER-private"
+        },
+        {
+          "schema_version": 2,
+          "attributes": {
+            "arn": "arn:aws:rds:eu-west-1:123456789012:db:old",
+            "identifier": "old",
+            "resource_id": "db-OLD",
+            "engine": "postgres",
+            "instance_class": "db.t4g.micro",
+            "password": "OOS-SECRET-MARKER-password",
+            "username": "admin",
+            "master_user_secret": [
+              {
+                "secret_arn": "OOS-SECRET-MARKER-secret-arn"
+              }
+            ],
+            "id": "db-OLD"
+          },
+          "sensitive_attributes": [
+            [
+              {
+                "type": "get_attr",
+                "value": "password"
+              }
+            ]
+          ],
+          "private": "OOS-SECRET-MARKER-private",
+          "deposed": "00000001"
+        }
+      ]
+    }
+  ],
+  "check_results": null
+}

@@ -2,7 +2,9 @@
 
 Find what's running outside your Terraform.
 
-`oos` compares the RDS DB instances in an AWS account with the Terraform states you supply, and reports the ones that no state tracks.
+`oos` compares the resources in an AWS account with the Terraform states you supply, reports the ones that no state tracks, and shows what the account spends on that type of resource. The first supported resource type is RDS DB instances. More will follow.
+
+`oos` reads Terraform state format version 4 (Terraform 0.12 and later, and OpenTofu).
 
 > **Status:** early development. The current release only prints its version.
 
