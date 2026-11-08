@@ -134,7 +134,7 @@ If you supply several snapshots of the same state (for example a working directo
 
 S3 reads the tags of every bucket (one request per bucket) so it can recognise buckets created by other tools. With many buckets this adds a second or two; `--type rds --type lb` skips S3.
 
-Lambda also reads tags one function at a time. AWS allows 15 requests per second across the Lambda API, so `oos` paces its tag requests to about 10 per second in each region: 100 functions take about 10 seconds. If the tags cannot all be read within the two-minute limit for a region, the remaining functions get a warning and are still matched. Use `--type` to leave Lambda out. `oos` never stores or reports environment variables, code locations or role policies.
+Lambda also reads tags with one request per function. AWS allows 15 requests per second across most of the Lambda control plane, so `oos` paces its tag requests to about 10 per second in each region: 100 functions take about 10 seconds. If the tags cannot all be read within the two-minute limit for a region, the remaining functions get a warning and are still matched. Use `--type` to leave Lambda out. `oos` never stores or reports environment variables, code locations or role policies.
 
 ### Cost (optional)
 
@@ -183,6 +183,8 @@ These are **all** RDS charges in those regions, not the cost of the import candi
   ]
 }
 ```
+
+If your policy predates a resource type, a scan of that type fails with access denied and the scan is reported as partial. Add the new permissions, or leave the type out with `--type` (for example `--type rds,lb,s3`).
 
 `ce:GetCostAndUsage` is only needed with `--cost`. Reading Terraform state uses your existing backend access (for example read access to the S3 state bucket).
 
