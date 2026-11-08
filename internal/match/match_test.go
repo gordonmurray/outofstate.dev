@@ -599,3 +599,46 @@ func TestS3Matching(t *testing.T) {
 		})
 	}
 }
+
+func fnARN(account, region, name string) string {
+	return "arn:aws:lambda:" + region + ":" + account + ":function:" + name
+}
+
+func fnInst(account, region, name string) discover.Instance {
+	return discover.Instance{Type: discover.TypeLambdaFunction, Kind: discover.KindLambda, Partition: "aws", AccountID: account,
+		Region: region, ARN: fnARN(account, region, name), Identifier: name}
+}
+
+func fnIdent(account, region, name string) tfstate.Identity {
+	return tfstate.Identity{Type: "aws_lambda_function", Address: "aws_lambda_function.f", Lifecycle: tfstate.LifecycleCurrent,
+		ARN: fnARN(account, region, name), Identifier: name, Partition: "aws", Region: region, AccountID: account}
+}
+
+func TestLambdaMatching(t *testing.T) {
+	otherType := fnIdent(acctA, euw1, "orders")
+	otherType.Type = "aws_db_instance"
+	tests := []struct {
+		name   string
+		id     tfstate.Identity
+		status Status
+	}{
+		{"same ARN", fnIdent(acctA, euw1, "orders"), StatusTracked},
+		{"different function", fnIdent(acctA, euw1, "billing"), StatusNoMatch},
+		{"same name, other account", fnIdent(acctB, euw1, "orders"), StatusNoMatch},
+		{"same name, other region", fnIdent(acctA, use1, "orders"), StatusNoMatch},
+		{"same ARN, other type", otherType, StatusNoMatch},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res := Run([]discover.Instance{fnInst(acctA, euw1, "orders")}, []Source{src("a", "L1", 1, tt.id)})
+			f := res.Findings[0]
+			if f.Status != tt.status {
+				t.Fatalf("status = %s, want %s", f.Status, tt.status)
+			}
+			if tt.status == StatusTracked && (f.Matches[0].MatchedOn != KeyARN || f.Matches[0].Weak) {
+				t.Errorf("match = %+v", f.Matches[0])
+			}
+			checkWarnings(t, "finding", f.Warnings, nil)
+		})
+	}
+}

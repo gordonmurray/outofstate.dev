@@ -11,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	elbv2 "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
+	"github.com/aws/aws-sdk-go-v2/service/lambda"
 	"github.com/aws/aws-sdk-go-v2/service/rds"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
@@ -57,6 +58,11 @@ type s3API interface {
 	GetBucketTagging(context.Context, *s3.GetBucketTaggingInput, ...func(*s3.Options)) (*s3.GetBucketTaggingOutput, error)
 }
 
+type lambdaAPI interface {
+	lambda.ListFunctionsAPIClient
+	ListTags(context.Context, *lambda.ListTagsInput, ...func(*lambda.Options)) (*lambda.ListTagsOutput, error)
+}
+
 type elbAPI interface {
 	elbv2.DescribeLoadBalancersAPIClient
 	DescribeTags(context.Context, *elbv2.DescribeTagsInput, ...func(*elbv2.Options)) (*elbv2.DescribeTagsOutput, error)
@@ -73,6 +79,7 @@ type AWS struct {
 	newELB          func(aws.Config, string) elbAPI
 	newS3           func(aws.Config, string) s3API
 	newS3PathStyle  func(aws.Config, string) s3API
+	newLambda       func(aws.Config, string) lambdaAPI
 	regionTimeout   time.Duration
 	identityTimeout time.Duration
 	maxConcurrent   int
@@ -115,6 +122,9 @@ func newAWS(cfg aws.Config) *AWS {
 		},
 		newS3PathStyle: func(c aws.Config, region string) s3API {
 			return s3.NewFromConfig(c, func(o *s3.Options) { o.Region = region; o.UsePathStyle = true })
+		},
+		newLambda: func(c aws.Config, region string) lambdaAPI {
+			return lambda.NewFromConfig(c, func(o *lambda.Options) { o.Region = region })
 		},
 		regionTimeout:   2 * time.Minute,
 		identityTimeout: 30 * time.Second,
@@ -174,6 +184,8 @@ func (a *AWS) Discover(ctx context.Context, regions []string, types ...string) (
 					rr = a.regionLB(ctx, partition, account, region)
 				case TypeS3Bucket:
 					rr = a.regionS3(ctx, partition, account, region)
+				case TypeLambdaFunction:
+					rr = a.regionLambda(ctx, partition, account, region)
 				default:
 					rr = a.region(ctx, partition, account, region)
 				}
@@ -440,6 +452,117 @@ func bucketTags(ctx context.Context, client s3API, bucket string) (*s3.GetBucket
 		}
 	}
 	return out, err
+}
+
+// lambdaTagWorkers bounds the ListTags calls in flight per region.
+var lambdaTagWorkers = 4
+
+// lambdaTagInterval paces ListTags calls per region. AWS allows 15 requests
+// per second across the Lambda control plane, shared with everything else in
+// the account, so oos starts about 10 tag calls per second to leave room for
+// the rest. SDK retries and the listing calls are not paced.
+var lambdaTagInterval = 100 * time.Millisecond
+
+// lambdaLastModifiedLayout is the format of LastModified in Lambda responses.
+const lambdaLastModifiedLayout = "2006-01-02T15:04:05.000-0700"
+
+// regionLambda lists the functions in one region, one finding per function
+// (published versions are not requested).
+//
+// Only allowlisted fields are copied out of each response. ListFunctions
+// returns environment variables, which can hold secrets, so nothing else
+// from the response may be kept, logged or put in an error.
+func (a *AWS) regionLambda(ctx context.Context, partition, account, region string) RegionResult {
+	ctx, cancel := context.WithTimeout(ctx, a.regionTimeout)
+	defer cancel()
+
+	client := a.newLambda(a.cfg, region)
+	p := lambda.NewListFunctionsPaginator(client, &lambda.ListFunctionsInput{})
+	var functions []Instance
+	for p.HasMorePages() {
+		page, err := p.NextPage(ctx)
+		if err != nil {
+			return RegionResult{Region: region, Failed: true, Error: categorise(ctx, err, false)}
+		}
+		for _, fn := range page.Functions {
+			inst := Instance{
+				Type:         TypeLambdaFunction,
+				Kind:         KindLambda,
+				Partition:    partition,
+				AccountID:    account,
+				Region:       region,
+				ARN:          aws.ToString(fn.FunctionArn),
+				Identifier:   aws.ToString(fn.FunctionName),
+				Runtime:      string(fn.Runtime),
+				PackageType:  string(fn.PackageType),
+				LastModified: lambdaLastModified(aws.ToString(fn.LastModified)),
+			}
+			if len(fn.Architectures) > 0 {
+				inst.Architecture = string(fn.Architectures[0])
+			}
+			functions = append(functions, inst)
+		}
+	}
+
+	// Tags: one call per function. A failure is a warning on that function.
+	// Once the scan is cancelled or times out, no new call is started.
+	work := make(chan int)
+	var wg sync.WaitGroup
+	for w := 0; w < min(lambdaTagWorkers, len(functions)); w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range work {
+				if ctx.Err() != nil {
+					functions[i].TagsUnavailable = true
+					continue
+				}
+				out, err := client.ListTags(ctx, &lambda.ListTagsInput{Resource: aws.String(functions[i].ARN)})
+				if err != nil {
+					functions[i].TagsUnavailable = true
+					continue
+				}
+				if len(out.Tags) > 0 {
+					functions[i].Tags = out.Tags
+				}
+			}
+		}()
+	}
+	var ticker *time.Ticker
+	if lambdaTagInterval > 0 {
+		ticker = time.NewTicker(lambdaTagInterval)
+		defer ticker.Stop()
+	}
+	for i := range functions {
+		if ticker != nil {
+			select {
+			case <-ticker.C:
+			case <-ctx.Done():
+			}
+		}
+		work <- i
+		if ticker != nil {
+			// Measure from the hand-off: a tick that came due while every
+			// worker was busy must not release the next call straight away.
+			ticker.Reset(lambdaTagInterval)
+		}
+	}
+	close(work)
+	wg.Wait()
+	for i := range functions {
+		Classify(&functions[i])
+	}
+	return RegionResult{Region: region, Instances: functions}
+}
+
+// lambdaLastModified converts Lambda's timestamp to RFC 3339 in UTC. A value
+// in any other format is dropped rather than shown as is.
+func lambdaLastModified(s string) string {
+	t, err := time.Parse(lambdaLastModifiedLayout, s)
+	if err != nil {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
 }
 
 // categorise maps an SDK error to a fixed category. The error text itself is

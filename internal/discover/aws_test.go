@@ -2,6 +2,7 @@ package discover
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -38,12 +39,20 @@ type fakeAWS struct {
 	s3TagStallFirst  map[string]bool              // bucket -> first GetBucketTagging call stalls
 	s3TagStallAlways map[string]bool              // bucket -> every GetBucketTagging call stalls
 	lbTags           map[string]map[string]string // ARN -> tags
+	lambdaPages      map[string][]string          // region -> pages of function JSON
+	lambdaTags       map[string]map[string]string // ARN -> tags
+	lambdaTagFail    map[string]bool              // ARN -> ListTags fails
+	lambdaQueries    []string                     // query string of each ListFunctions call
 	tagBatches       []int                        // ARNs per DescribeTags call
 	inflight         int
 	maxSeen          int
 }
 
 func (f *fakeAWS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/2015-03-31/functions") || strings.HasPrefix(r.URL.Path, "/2017-03-31/tags/") {
+		f.serveLambda(w, r)
+		return
+	}
 	if r.Method == http.MethodGet {
 		f.serveS3(w, r)
 		return
@@ -879,4 +888,229 @@ func (f *fakeAWS) countPrefix(prefix string) int {
 		}
 	}
 	return n
+}
+
+func (f *fakeAWS) serveLambda(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	f.inflight++
+	if f.inflight > f.maxSeen {
+		f.maxSeen = f.inflight
+	}
+	f.mu.Unlock()
+	defer func() { f.mu.Lock(); f.inflight--; f.mu.Unlock() }()
+	if f.slow > 0 {
+		time.Sleep(f.slow)
+	}
+	region := regionFromAuth(r.Header.Get("Authorization"))
+	w.Header().Set("Content-Type", "application/json")
+	fail := func(code string) {
+		w.Header().Set("X-Amzn-Errortype", code)
+		w.WriteHeader(403)
+		_, _ = fmt.Fprint(w, `{"Message":"OOS-SECRET-MARKER"}`)
+	}
+	if arn, ok := strings.CutPrefix(r.URL.Path, "/2017-03-31/tags/"); ok {
+		f.mu.Lock()
+		f.calls["ListTags/"+arn]++
+		f.mu.Unlock()
+		if f.lambdaTagFail[arn] {
+			fail("AccessDeniedException")
+			return
+		}
+		tags, _ := json.Marshal(f.lambdaTags[arn])
+		_, _ = fmt.Fprintf(w, `{"Tags":%s}`, tags)
+		return
+	}
+	f.mu.Lock()
+	f.calls["ListFunctions/"+region]++
+	f.lambdaQueries = append(f.lambdaQueries, r.URL.RawQuery)
+	f.mu.Unlock()
+	page := 0
+	if m := r.URL.Query().Get("Marker"); m != "" {
+		_, _ = fmt.Sscanf(m, "page-%d", &page)
+	}
+	if fp, ok := f.failPage["lambda/"+region]; ok && fp == page {
+		fail(f.failCode)
+		return
+	}
+	pages := f.lambdaPages[region]
+	body := ""
+	if page < len(pages) {
+		body = pages[page]
+	}
+	marker := "null"
+	if page+1 < len(pages) {
+		marker = fmt.Sprintf(`"page-%d"`, page+1)
+	}
+	_, _ = fmt.Fprintf(w, `{"Functions":[%s],"NextMarker":%s}`, body, marker)
+}
+
+func fnARN(name string) string {
+	return "arn:aws:lambda:eu-west-1:" + account + ":function:" + name
+}
+
+// fnJSON is a ListFunctions entry. Every field oos must not keep holds the
+// secret marker.
+func fnJSON(name string) string {
+	return fmt.Sprintf(`{"FunctionName":%q,"FunctionArn":%q,"Runtime":"python3.13","PackageType":"Zip","Architectures":["arm64"],
+"LastModified":"2025-05-01T09:00:00.000+0100","Handler":"OOS-SECRET-MARKER","Description":"OOS-SECRET-MARKER","Role":"arn:aws:iam::123456789012:role/OOS-SECRET-MARKER",
+"Environment":{"Variables":{"API_KEY":"OOS-SECRET-MARKER"}}}`, name, fnARN(name))
+}
+
+// fastLambda turns off the pacing of tag calls for one test.
+func fastLambda(t *testing.T) {
+	t.Helper()
+	old := lambdaTagInterval
+	lambdaTagInterval = 0
+	t.Cleanup(func() { lambdaTagInterval = old })
+}
+
+func TestLambdaDiscovery(t *testing.T) {
+	fastLambda(t)
+	image := fmt.Sprintf(`{"FunctionName":"job","FunctionArn":%q,"PackageType":"Image","Architectures":["x86_64"],"LastModified":"not a date"}`, fnARN("job"))
+	f := &fakeAWS{
+		lambdaPages: map[string][]string{"eu-west-1": {
+			fnJSON("orders") + "," + fnJSON("stack-fn"),
+			image + "," + fnJSON("aws-controltower-Forwarder") + "," + fnJSON("no-tag-access"),
+		}},
+		lambdaTags: map[string]map[string]string{
+			fnARN("orders"):   {"team": "data"},
+			fnARN("stack-fn"): {"aws:cloudformation:stack-name": "app"},
+		},
+		lambdaTagFail: map[string]bool{fnARN("no-tag-access"): true},
+	}
+	inv, err := newTestAWS(t, f).Discover(context.Background(), []string{"eu-west-1"}, TypeLambdaFunction)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !inv.Complete() || len(inv.Regions) != 1 || inv.Regions[0].Type != TypeLambdaFunction {
+		t.Fatalf("%+v", inv.Regions)
+	}
+	by := map[string]Instance{}
+	for _, fn := range inv.Instances() {
+		by[fn.Identifier] = fn
+	}
+	if len(by) != 5 {
+		t.Fatalf("functions = %d, want 5 (two pages)", len(by))
+	}
+	o := by["orders"]
+	if o.Type != TypeLambdaFunction || o.Kind != KindLambda || o.ARN != fnARN("orders") || o.Region != "eu-west-1" || o.AccountID != account ||
+		o.Runtime != "python3.13" || o.PackageType != "Zip" || o.Architecture != "arm64" ||
+		o.LastModified != "2025-05-01T08:00:00Z" || o.Tags["team"] != "data" || o.TagsUnavailable || o.ManagedBy != "" || o.NotCovered != "" {
+		t.Errorf("orders: %+v", o)
+	}
+	if j := by["job"]; j.Runtime != "" || j.PackageType != "Image" || j.Architecture != "x86_64" || j.LastModified != "" {
+		t.Errorf("container image: %+v", j)
+	}
+	if by["stack-fn"].ManagedBy != ManagedByCloudFormation {
+		t.Errorf("stack-fn: %+v", by["stack-fn"])
+	}
+	if c := by["aws-controltower-Forwarder"]; c.LikelyCreatedBy != ManagedByControlTower || c.ManagedBy != "" {
+		t.Errorf("control tower: %+v", c)
+	}
+	if !by["no-tag-access"].TagsUnavailable {
+		t.Errorf("tag failure must be a warning: %+v", by["no-tag-access"])
+	}
+	if dump := fmt.Sprintf("%+v %#v", inv, inv); strings.Contains(dump, "OOS-SECRET-MARKER") {
+		t.Errorf("a field outside the allowlist was kept: %s", dump)
+	}
+	for _, q := range f.lambdaQueries {
+		if strings.Contains(q, "FunctionVersion") {
+			t.Errorf("published versions must not be requested: %q", q)
+		}
+	}
+	if f.calls["ListFunctions/eu-west-1"] != 2 {
+		t.Errorf("ListFunctions calls = %d, want 2", f.calls["ListFunctions/eu-west-1"])
+	}
+}
+
+func TestLambdaFailureOnlyFailsThatType(t *testing.T) {
+	fastLambda(t)
+	f := &fakeAWS{pages: map[string][]string{"eu-west-1": {db("orders-db", "db-ORDERS", `<TagList></TagList>`)}},
+		failPage: map[string]int{"lambda/eu-west-1": 0}, failCode: "AccessDeniedException"}
+	inv, err := newTestAWS(t, f).Discover(context.Background(), []string{"eu-west-1"}, TypeDBInstance, TypeLambdaFunction)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inv.Regions[0].Failed || !inv.Regions[1].Failed || inv.Regions[1].Error != ErrAccessDenied {
+		t.Errorf("%+v", inv.Regions)
+	}
+}
+
+func TestLambdaLaterPageFailure(t *testing.T) {
+	fastLambda(t)
+	f := &fakeAWS{lambdaPages: map[string][]string{"eu-west-1": {fnJSON("a"), fnJSON("b")}},
+		failPage: map[string]int{"lambda/eu-west-1": 1}, failCode: "TooManyRequestsException"}
+	a := newTestAWS(t, f)
+	inv, err := a.Discover(context.Background(), []string{"eu-west-1"}, TypeLambdaFunction)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := inv.Regions[0]; !r.Failed || r.Error != ErrThrottled || len(r.Instances) != 0 {
+		t.Errorf("a later-page failure must fail the region with no partial list: %+v", r)
+	}
+}
+
+func fnPage(n int) string {
+	names := make([]string, n)
+	for i := range names {
+		names[i] = fnJSON(fmt.Sprintf("fn-%02d", i))
+	}
+	return strings.Join(names, ",")
+}
+
+func TestLambdaTagConcurrencyIsBounded(t *testing.T) {
+	fastLambda(t)
+	old := lambdaTagWorkers
+	lambdaTagWorkers = 3
+	t.Cleanup(func() { lambdaTagWorkers = old })
+	f := &fakeAWS{lambdaPages: map[string][]string{"eu-west-1": {fnPage(20)}}, slow: 20 * time.Millisecond}
+	inv, err := newTestAWS(t, f).Discover(context.Background(), []string{"eu-west-1"}, TypeLambdaFunction)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inv.Instances()) != 20 {
+		t.Fatalf("functions = %d", len(inv.Instances()))
+	}
+	if f.maxSeen > 3 {
+		t.Errorf("max concurrent Lambda requests = %d, want <= 3", f.maxSeen)
+	}
+}
+
+func TestLambdaTagCallsArePaced(t *testing.T) {
+	old := lambdaTagInterval
+	lambdaTagInterval = 30 * time.Millisecond
+	t.Cleanup(func() { lambdaTagInterval = old })
+	f := &fakeAWS{lambdaPages: map[string][]string{"eu-west-1": {fnPage(5)}}}
+	start := time.Now()
+	if _, err := newTestAWS(t, f).Discover(context.Background(), []string{"eu-west-1"}, TypeLambdaFunction); err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d < 120*time.Millisecond {
+		t.Errorf("5 tag calls took %s, want at least 120ms", d)
+	}
+}
+
+func TestLambdaTimeoutStopsTagging(t *testing.T) {
+	old := lambdaTagInterval
+	lambdaTagInterval = 50 * time.Millisecond
+	t.Cleanup(func() { lambdaTagInterval = old })
+	f := &fakeAWS{lambdaPages: map[string][]string{"eu-west-1": {fnPage(20)}}}
+	a := newTestAWS(t, f)
+	a.regionTimeout = 200 * time.Millisecond // listing succeeds, tagging is cut short
+	inv, err := a.Discover(context.Background(), []string{"eu-west-1"}, TypeLambdaFunction)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inv.Regions[0].Failed || len(inv.Instances()) != 20 {
+		t.Fatalf("the listing was complete, so the region must not fail: %+v", inv.Regions[0])
+	}
+	unavailable := 0
+	for _, fn := range inv.Instances() {
+		if fn.TagsUnavailable {
+			unavailable++
+		}
+	}
+	if tagCalls := f.countPrefix("ListTags/"); unavailable == 0 || tagCalls >= 20 {
+		t.Errorf("after the deadline no new calls should start: %d tag calls, %d marked unavailable", tagCalls, unavailable)
+	}
 }

@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/gordonmurray/outofstate.dev/internal/cost"
@@ -237,8 +238,8 @@ const regionWidth = 15
 
 func padRegion(s string) string { return pad(s, regionWidth) }
 
-// kindWidth fits the longest kind label (gwlb).
-const kindWidth = 5
+// kindWidth fits the longest kind label (lambda).
+const kindWidth = 6
 
 func padKind(s string) string { return pad(s, kindWidth) }
 
@@ -249,6 +250,12 @@ func columns(f Finding) (string, string) {
 		return clean(f.Details["scheme"]), clean(f.Details["vpc_id"])
 	case "aws_s3_bucket":
 		return "", ""
+	case "aws_lambda_function":
+		runtime := f.Details["runtime"]
+		if runtime == "" {
+			runtime = strings.ToLower(f.Details["package_type"]) // container images have no runtime
+		}
+		return clean(runtime), clean(f.Details["architecture"])
 	default:
 		return clean(f.Class), clean(f.Engine + " " + f.EngineVersion)
 	}
@@ -260,6 +267,8 @@ func typeLabel(resourceType string) string {
 		return "load balancers"
 	case "aws_s3_bucket":
 		return "S3 buckets"
+	case "aws_lambda_function":
+		return "Lambda functions"
 	case "", "aws_db_instance":
 		return "RDS DB instances"
 	}
@@ -276,6 +285,8 @@ func toolLabel(tool string) string {
 		return "Kubernetes (AWS Load Balancer Controller)"
 	case "cdk":
 		return "CDK (bootstrap)"
+	case "control_tower":
+		return "AWS Control Tower"
 	}
 	return clean(tool)
 }
@@ -296,6 +307,13 @@ func (p *printer) f(format string, a ...any) {
 }
 
 func created(f Finding) string {
+	if f.ResourceType == "aws_lambda_function" { // Lambda has no creation date
+		t, err := time.Parse(time.RFC3339, f.Details["last_modified"])
+		if err != nil {
+			return ""
+		}
+		return "modified " + t.UTC().Format("2006-01-02")
+	}
 	if f.Created == nil {
 		return ""
 	}

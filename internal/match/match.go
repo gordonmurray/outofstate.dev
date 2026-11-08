@@ -282,6 +282,10 @@ func inScope(inst discover.Instance, id tfstate.Identity) bool {
 // Load balancers: the ARN is the identity (it ends in a generated suffix, so
 // a recreated load balancer has a new ARN). An equal ARN is a strong match.
 //
+// Lambda functions: the unqualified ARN is the best identity available. Lambda
+// has no immutable ID, so a function deleted and recreated with the same name
+// has the same ARN and cannot be told apart from the original.
+//
 // RDS DB instances: when both sides have a resource ID, only the
 // resource ID decides; a different resource ID with the same ARN is a stale
 // state entry (the database was recreated) and never falls back to ARN or
@@ -305,7 +309,7 @@ func compare(inst discover.Instance, id tfstate.Identity) (key Key, weak, rename
 		}
 		return KeyARN, id.Region == "", false, false
 	}
-	if inst.TerraformType() == discover.TypeLoadBalancer {
+	if t := inst.TerraformType(); t == discover.TypeLoadBalancer || t == discover.TypeLambdaFunction {
 		if inst.ARN != "" && inst.ARN == id.ARN {
 			return KeyARN, false, false, false
 		}

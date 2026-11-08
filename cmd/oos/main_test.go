@@ -197,6 +197,7 @@ func TestReportsMatchSchema(t *testing.T) {
 		"duplicate state":            {"--inventory-file", td("inventory.json"), "--state-file", td("app.tfstate.json"), "--state-file", td("app-copy.tfstate.json")},
 		"load balancers":             {"--inventory-file", td("inventory_with_lb.json"), "--state-file", td("app.tfstate.json"), "--state-file", td("edge.tfstate.json")},
 		"s3 buckets":                 {"--inventory-file", td("inventory_with_s3.json"), "--state-file", td("storage.tfstate.json")},
+		"lambda functions":           {"--inventory-file", td("inventory_with_lambda.json"), "--state-file", td("lambda.tfstate.json")},
 	}
 	if err := os.WriteFile(td("app-copy.tfstate.json"), mustRead(t, td("app.tfstate.json")), 0o600); err != nil {
 		t.Fatal(err)
@@ -518,9 +519,9 @@ func TestLoadBalancers(t *testing.T) {
 
 	_, text, _ := oos(t, args...)
 	for _, want := range []string{
-		"  legacy-alb               eu-west-1       alb   internal         vpc-1",
-		"  web-alb                  eu-west-1       alb   testdata/edge.tfstate.json (unknown) aws_lb.web (arn)",
-		"  inspection               eu-west-1       gwlb  Gateway Load Balancer",
+		"  legacy-alb               eu-west-1       alb    internal         vpc-1",
+		"  web-alb                  eu-west-1       alb    testdata/edge.tfstate.json (unknown) aws_lb.web (arn)",
+		"  inspection               eu-west-1       gwlb   Gateway Load Balancer",
 		"k8s-ingress: its tags suggest it is managed by Kubernetes (AWS Load Balancer Controller)",
 	} {
 		if !strings.Contains(text, want) {
@@ -560,6 +561,9 @@ func TestTypeFlag(t *testing.T) {
 	}
 	if _, m := count("--type", "rds,alb"); m["aws_db_instance"] != 4 || m["aws_lb"] != 4 {
 		t.Errorf("--type rds,alb: %v", m)
+	}
+	if _, m := count("--type", "lambda"); len(m) != 0 {
+		t.Errorf("--type lambda: %v", m)
 	}
 	if code, _ := count("--type", "sqs"); code != scan.ExitFatal {
 		t.Errorf("unknown type: exit %d", code)
@@ -618,8 +622,79 @@ func TestS3Buckets(t *testing.T) {
 
 	_, text, _ := oos(t, args...)
 	for _, want := range []string{
-		"  acme-logs                eu-west-1       s3    testdata/storage.tfstate.json (unknown) aws_s3_bucket.logs (arn)",
+		"  acme-logs                eu-west-1       s3     testdata/storage.tfstate.json (unknown) aws_s3_bucket.logs (arn)",
 		"its name suggests it was created by CDK (bootstrap)",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("text missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestLambdaFunctions(t *testing.T) {
+	args := []string{"--inventory-file", td("inventory_with_lambda.json"), "--type", "lambda", "--state-file", td("lambda.tfstate.json")}
+	// oos fails the test if the secret marker reaches stdout or stderr: both
+	// the inventory and the state hold it in environment variables.
+	code, out, _ := oos(t, append(args, "--format", "json")...)
+	if code != scan.ExitNoMatch {
+		t.Fatalf("exit = %d", code)
+	}
+	var rep struct {
+		Findings []struct {
+			Identifier string            `json:"identifier"`
+			Kind       string            `json:"kind"`
+			Status     string            `json:"status"`
+			ImportID   string            `json:"import_id"`
+			Details    map[string]string `json:"details"`
+			Tags       map[string]string `json:"tags"`
+			Warnings   []struct {
+				Kind string `json:"kind"`
+				Tool string `json:"tool"`
+			} `json:"warnings"`
+		} `json:"findings"`
+	}
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Findings) != 6 {
+		t.Fatalf("findings = %d, want 6", len(rep.Findings))
+	}
+	by := map[string]int{}
+	for i, f := range rep.Findings {
+		by[f.Identifier] = i
+	}
+	for _, name := range []string{"orders-api", "nightly-cleanup", "alias-only", "sam-webhook", "aws-controltower-NotificationForwarder", "container-job"} {
+		if _, ok := by[name]; !ok {
+			t.Fatalf("no finding for %s", name)
+		}
+	}
+	if f := rep.Findings[by["orders-api"]]; f.Status != "tracked" || f.Kind != "lambda" {
+		t.Errorf("orders-api: %+v", f)
+	}
+	nc := rep.Findings[by["nightly-cleanup"]]
+	if nc.Status != "no_match" || nc.ImportID != "nightly-cleanup" || nc.Tags["team"] != "ops" || len(nc.Warnings) != 0 ||
+		nc.Details["runtime"] != "python3.13" || nc.Details["package_type"] != "Zip" || nc.Details["architecture"] != "arm64" ||
+		nc.Details["last_modified"] != "2025-05-01T08:00:00Z" {
+		t.Errorf("nightly-cleanup: %+v", nc)
+	}
+	if f := rep.Findings[by["alias-only"]]; f.Status != "no_match" {
+		t.Errorf("alias-only (only an alias in state): %+v", f)
+	}
+	if f := rep.Findings[by["sam-webhook"]]; f.Status != "no_match" || len(f.Warnings) != 1 || f.Warnings[0].Kind != "managed_by_other_tool" || f.Warnings[0].Tool != "cloudformation" {
+		t.Errorf("sam-webhook: %+v", f)
+	}
+	if f := rep.Findings[by["aws-controltower-NotificationForwarder"]]; len(f.Warnings) != 1 || f.Warnings[0].Kind != "likely_created_by" || f.Warnings[0].Tool != "control_tower" {
+		t.Errorf("control tower function: %+v", f)
+	}
+
+	_, text, _ := oos(t, args...)
+	for _, want := range []string{
+		"eu-west-1       lambda python3.13       arm64",
+		"eu-west-1       lambda image            x86_64",
+		"modified 2025-05-01",
+		"eu-west-1       lambda testdata/lambda.tfstate.json (unknown) aws_lambda_function.orders (arn)",
+		"its tags suggest it is managed by CloudFormation",
+		"its name suggests it was created by AWS Control Tower",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("text missing %q:\n%s", want, text)

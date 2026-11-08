@@ -130,6 +130,8 @@ var supportedTypes = map[string]string{
 	"aws_lb":          "aws_lb",
 	"aws_alb":         "aws_lb",
 	"aws_s3_bucket":   "aws_s3_bucket",
+
+	"aws_lambda_function": "aws_lambda_function",
 }
 
 // Raw state shapes. Only the fields oos needs are declared, so everything
@@ -259,6 +261,8 @@ func identity(typ, addr string, inst rawInstance) (Identity, ProblemKind) {
 			_ = json.Unmarshal(inst.Identity, &ri)
 		}
 		return bucketIdentity(id, attrs, ri)
+	case "aws_lambda_function":
+		return lambdaIdentity(id, attrs)
 	}
 
 	normalise(&id, attrs)
@@ -304,6 +308,23 @@ func lbIdentity(id Identity, a rawAttributes) (Identity, ProblemKind) {
 	if id.Identifier == "" {
 		id.Identifier = arn.Name
 	}
+	id.Partition, id.Region, id.AccountID = arn.Partition, arn.Region, arn.AccountID
+	return id, ""
+}
+
+// lambdaIdentity reads an aws_lambda_function object. Its identity is the
+// unqualified function ARN, which gives the partition, account and region.
+// The name comes from the ARN too. Environment variables are in the same
+// object, but rawAttributes does not declare them, so they are never decoded.
+func lambdaIdentity(id Identity, a rawAttributes) (Identity, ProblemKind) {
+	if a.ARN == "" {
+		return Identity{}, ProblemMissingARN
+	}
+	arn, ok := ParseLambdaARN(a.ARN)
+	if !ok {
+		return Identity{}, ProblemInvalidARN
+	}
+	id.ARN, id.Identifier = a.ARN, arn.Name
 	id.Partition, id.Region, id.AccountID = arn.Partition, arn.Region, arn.AccountID
 	return id, ""
 }
