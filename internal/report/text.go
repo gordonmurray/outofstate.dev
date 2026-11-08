@@ -256,6 +256,8 @@ func columns(f Finding) (string, string) {
 			runtime = strings.ToLower(f.Details["package_type"]) // container images have no runtime
 		}
 		return clean(runtime), clean(f.Details["architecture"])
+	case "aws_nat_gateway":
+		return clean(strings.TrimSpace(f.Details["connectivity_type"] + " " + f.Details["availability_mode"])), clean(f.Details["vpc_id"])
 	default:
 		return clean(f.Class), clean(f.Engine + " " + f.EngineVersion)
 	}
@@ -269,6 +271,8 @@ func typeLabel(resourceType string) string {
 		return "S3 buckets"
 	case "aws_lambda_function":
 		return "Lambda functions"
+	case "aws_nat_gateway":
+		return "NAT gateways"
 	case "", "aws_db_instance":
 		return "RDS DB instances"
 	}
@@ -314,10 +318,16 @@ func created(f Finding) string {
 		}
 		return "modified " + t.UTC().Format("2006-01-02")
 	}
-	if f.Created == nil {
-		return ""
+	out := ""
+	if f.Created != nil {
+		out = "created " + f.Created.UTC().Format("2006-01-02")
 	}
-	return "created " + f.Created.UTC().Format("2006-01-02")
+	if f.ResourceType == "aws_nat_gateway" { // the ID alone says little to a reader
+		if name := clean(f.Details["name"]); name != "" {
+			out = strings.TrimSpace(out + "  name " + name)
+		}
+	}
+	return out
 }
 
 func filter(fs []Finding, status string) []Finding {

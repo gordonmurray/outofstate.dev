@@ -1,11 +1,11 @@
 ---
 name: oos
-description: Find AWS resources that no Terraform state tracks, using the oos (Out of State) CLI, and help bring chosen ones under Terraform with import blocks. Use when the user asks what is running outside Terraform, which AWS resources are unmanaged, untracked or missing from Terraform, or wants to import existing RDS DB instances, load balancers, S3 buckets or Lambda functions into Terraform.
+description: Find AWS resources that no Terraform state tracks, using the oos (Out of State) CLI, and help bring chosen ones under Terraform with import blocks. Use when the user asks what is running outside Terraform, which AWS resources are unmanaged, untracked or missing from Terraform, or wants to import existing RDS DB instances, load balancers, S3 buckets, Lambda functions or NAT gateways into Terraform.
 ---
 
 # Out of State (oos)
 
-`oos` compares the AWS resources in an account with the Terraform states the user supplies and reports the ones no state tracks. It supports RDS DB instances (`rds`), Application and Network Load Balancers (`lb`), S3 general purpose buckets (`s3`) and Lambda functions (`lambda`). It is read-only: it lists resources through the AWS API and reads state with `terraform state pull`.
+`oos` compares the AWS resources in an account with the Terraform states the user supplies and reports the ones no state tracks. It supports RDS DB instances (`rds`), Application and Network Load Balancers (`lb`), S3 general purpose buckets (`s3`), Lambda functions (`lambda`) and NAT gateways (`nat`). It is read-only: it lists resources through the AWS API and reads state with `terraform state pull`.
 
 ## Safety rules (always)
 
@@ -45,7 +45,7 @@ oos --profile <profile> --region <region> \
   --format json --output oos-report.json
 ```
 
-Useful flags: `--type rds|lb|s3|lambda` (repeatable; default all), `--state-file <file>` for a state JSON file, `--tf-binary tofu` for OpenTofu, `--cost` for RDS spend (slower, costs a little).
+Useful flags: `--type rds|lb|s3|lambda|nat` (repeatable; default all), `--state-file <file>` for a state JSON file, `--tf-binary tofu` for OpenTofu, `--cost` for RDS spend (slower, costs a little).
 
 Exit codes: `0` everything in scope is tracked; `1` error, no report (read stderr); `2` complete scan with untracked resources; `3` partial scan (a state source or region could not be read fully). Exit codes 2 and 3 are normal results, not failures.
 
@@ -55,7 +55,7 @@ The JSON follows `docs/report.schema.json` in the oos repository. Check `scan.co
 
 Also check the top-level `warnings[]`: `duplicate_snapshot` (the same state was supplied twice, counted once) and `diverged_copies` (several versions of one state were supplied; only the newest, listed first, was used).
 
-Each entry in `findings[]` has a `resource_type` (`aws_db_instance`, `aws_lb`, `aws_s3_bucket`, `aws_lambda_function`), `kind`, `identifier`, `arn`, `region`, `import_id` and a `status`:
+Each entry in `findings[]` has a `resource_type` (`aws_db_instance`, `aws_lb`, `aws_s3_bucket`, `aws_lambda_function`, `aws_nat_gateway`), `kind`, `identifier`, `arn`, `region`, `import_id` and a `status`:
 
 | status | Meaning | What to do |
 |---|---|---|
@@ -87,7 +87,7 @@ Work in the Terraform project the user chose, on a new branch if it is a git rep
    }
    ```
 
-   Import IDs: `aws_db_instance` takes the DB identifier, `aws_lb` takes the load balancer ARN, `aws_s3_bucket` takes the bucket name, `aws_lambda_function` takes the function name. `oos` already puts the right one in `import_id`.
+   Import IDs: `aws_db_instance` takes the DB identifier, `aws_lb` takes the load balancer ARN, `aws_s3_bucket` takes the bucket name, `aws_lambda_function` takes the function name, `aws_nat_gateway` takes the gateway ID. `oos` already puts the right one in `import_id`.
 
 2. **Generate a starting configuration** (Terraform 1.5 or later). This changes nothing in AWS or in state, but it does write the named file, so tell the user first:
 
@@ -121,3 +121,4 @@ Work in the Terraform project the user chose, on a new branch if it is a git rep
 - **Load balancers (`aws_lb`)**: listeners, rules and target groups are separate Terraform resources (`aws_lb_listener`, `aws_lb_target_group`, ...) and oos does not check them yet. Importing the load balancer does not import them. They may already be tracked in another state, or not at all; tell the user and check before importing them.
 - **S3 (`aws_s3_bucket`)**: bucket settings such as versioning, encryption, lifecycle and policy are separate resources in current AWS provider versions (`aws_s3_bucket_versioning`, ...). The generated configuration may need splitting into them.
 - **Lambda (`aws_lambda_function`)**: the function's code is not part of the import, so the configuration needs a code source (`filename`, `s3_bucket` and `s3_key`, or `image_uri`) and the plan may still show a change to it. Generated configuration can contain environment variables, which can hold secrets: check it before showing or committing it. Aliases, permissions and event source mappings are separate resources that `oos` does not check.
+- **NAT gateways (`aws_nat_gateway`)**: the Elastic IP (`aws_eip`) and the routes that use the gateway are separate resources that `oos` does not check. Changing the subnet or Elastic IP in the configuration replaces the gateway and interrupts outbound traffic, so make sure the plan does not. `matches[].weak` means the state was written by an older provider version and does not record the account and region.

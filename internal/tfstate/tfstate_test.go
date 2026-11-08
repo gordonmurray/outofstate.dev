@@ -594,3 +594,51 @@ func TestParseLambdaARN(t *testing.T) {
 		}
 	}
 }
+
+// Recorded scope that is malformed or contradictory must not be read as
+// absent, which would allow a weak match.
+func TestNATBadRecordedScopeIsAProblem(t *testing.T) {
+	probs := map[string]ProblemKind{}
+	for _, p := range parse(t, "nat.json").Problems {
+		probs[p.Address] = p.Kind
+	}
+	for _, name := range []string{"region_conflict", "bad_account", "numeric_account", "bad_identity_shape"} {
+		if got := probs["aws_nat_gateway."+name]; got != ProblemUnreadableObject {
+			t.Errorf("%s: problem = %q, want %q", name, got, ProblemUnreadableObject)
+		}
+	}
+}
+
+func natID(s string) string { return "nat-" + strings.Repeat("0", 17-len(s)) + s }
+
+func TestNATGateways(t *testing.T) {
+	st := parse(t, "nat.json")
+	got := byAddress(st)
+	want := map[string]struct{ id, region, account string }{
+		`module.network.aws_nat_gateway.a[0]`:  {natID("a"), "eu-west-1", "123456789012"},
+		`aws_nat_gateway.regional`:             {natID("b"), "eu-west-1", "123456789012"},
+		`aws_nat_gateway.region_attr_only`:     {natID("c"), "eu-west-1", ""},
+		`aws_nat_gateway.identity_region_only`: {natID("d"), "eu-west-2", ""},
+		`aws_nat_gateway.blank_identity`:       {natID("20"), "", ""},
+		`aws_nat_gateway.null_identity`:        {natID("21"), "", ""},
+		`aws_nat_gateway.legacy`:               {natID("e"), "", ""},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %v (data sources and other types must not count)", keys(got))
+	}
+	for addr, w := range want {
+		id := got[addr]
+		if id.Type != "aws_nat_gateway" || id.ResourceID != w.id || id.Identifier != w.id || id.Region != w.region ||
+			id.AccountID != w.account || id.Partition != "" || id.ARN != "" {
+			t.Errorf("%s: %+v", addr, id)
+		}
+	}
+	probs := map[string]ProblemKind{}
+	for _, p := range st.Problems {
+		probs[p.Address] = p.Kind
+	}
+	if probs["aws_nat_gateway.no_id"] != ProblemMissingID || probs["aws_nat_gateway.not_a_gateway"] != ProblemInvalidID ||
+		probs["aws_nat_gateway.identity_disagrees"] != ProblemInvalidID || len(probs) != 7 {
+		t.Errorf("problems: %+v", st.Problems)
+	}
+}

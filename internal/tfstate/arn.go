@@ -141,3 +141,7 @@ func ParseLambdaARN(s string) (LambdaARN, bool) {
 	}
 	return a, true
 }
+
+// natIDRE matches a NAT gateway ID. AWS generates these, so anything else in
+// "id" is not a gateway.
+var natIDRE = regexp.MustCompile(`^nat-[0-9a-f]{8,32}$`)

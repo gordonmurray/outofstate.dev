@@ -1,6 +1,6 @@
 // Package discover lists AWS resources: RDS DB instances, Elastic Load
-// Balancing v2 load balancers, S3 general purpose buckets and Lambda
-// functions.
+// Balancing v2 load balancers, S3 general purpose buckets, Lambda functions
+// and NAT gateways.
 package discover
 
 import (
@@ -17,6 +17,8 @@ const (
 	TypeS3Bucket     = "aws_s3_bucket"
 	// TypeLambdaFunction is the Terraform type of a Lambda function.
 	TypeLambdaFunction = "aws_lambda_function"
+	// TypeNATGateway is the Terraform type of a NAT gateway.
+	TypeNATGateway = "aws_nat_gateway"
 )
 
 // Kinds are short labels for reports.
@@ -28,6 +30,8 @@ const (
 	KindS3   = "s3"
 	// KindLambda is the report label of a Lambda function.
 	KindLambda = "lambda"
+	// KindNAT is the report label of a NAT gateway.
+	KindNAT = "nat"
 )
 
 // Instance is one discovered AWS resource. The name is historical: it holds
@@ -60,6 +64,11 @@ type Instance struct {
 	PackageType  string // Zip or Image
 	Architecture string // x86_64 or arm64
 	LastModified string // RFC 3339, UTC; empty when AWS sent an unknown format
+
+	// NAT gateway details. VPCID is shared with load balancers.
+	SubnetID         string // zonal gateways only
+	ConnectivityType string // public or private
+	AvailabilityMode string // zonal or regional
 
 	Status string // DBInstanceStatus, or load balancer state
 	Tags   map[string]string
@@ -132,8 +141,15 @@ func Classify(inst *Instance) {
 		inst.Kind = KindS3
 	case TypeLambdaFunction:
 		inst.Kind = KindLambda
+	case TypeNATGateway:
+		inst.Kind = KindNAT
 	}
 	inst.ManagedBy = managedBy(inst.Tags)
+	if inst.TerraformType() == TypeNATGateway && inst.ManagedBy == ManagedByKubernetes {
+		// VPC modules often copy kubernetes.io/cluster/* tags onto every
+		// resource, but Kubernetes does not manage NAT gateways.
+		inst.ManagedBy = ""
+	}
 	inst.LikelyCreatedBy = ""
 	if inst.ManagedBy == "" {
 		switch inst.TerraformType() {
@@ -143,6 +159,18 @@ func Classify(inst *Instance) {
 			inst.LikelyCreatedBy = functionCreatedBy(inst.Identifier)
 		}
 	}
+}
+
+// NATGatewayGone reports whether a NAT gateway in this state is not an import
+// candidate: it is being deleted, is deleted, or failed to create. These are
+// left out of discovery. Any other state, including one AWS adds later, is
+// kept, so that an unfamiliar state cannot hide a gateway.
+func NATGatewayGone(state string) bool {
+	switch state {
+	case "deleting", "deleted", "failed":
+		return true
+	}
+	return false
 }
 
 // functionCreatedBy recognises functions that account-setup tooling creates

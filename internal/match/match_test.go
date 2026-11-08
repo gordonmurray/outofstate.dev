@@ -642,3 +642,47 @@ func TestLambdaMatching(t *testing.T) {
 		})
 	}
 }
+
+const natA = "nat-0aaaaaaaaaaaaaaa1"
+
+func natInst(id string) discover.Instance {
+	return discover.Instance{Type: discover.TypeNATGateway, Kind: discover.KindNAT, Partition: "aws", AccountID: acctA, Region: euw1,
+		ARN: "arn:aws:ec2:" + euw1 + ":" + acctA + ":natgateway/" + id, Identifier: id, ResourceID: id}
+}
+
+func natIdent(id, account, region string) tfstate.Identity {
+	return tfstate.Identity{Type: "aws_nat_gateway", Address: "aws_nat_gateway.a", Lifecycle: tfstate.LifecycleCurrent,
+		Identifier: id, ResourceID: id, Region: region, AccountID: account}
+}
+
+// The scope rule for state that has no ARN: see compare.
+func TestNATMatching(t *testing.T) {
+	tests := []struct {
+		name   string
+		id     tfstate.Identity
+		status Status
+		weak   bool
+	}{
+		{"account and region recorded", natIdent(natA, acctA, euw1), StatusTracked, false},
+		{"region only: weaker", natIdent(natA, "", euw1), StatusTracked, true},
+		{"account only: weaker", natIdent(natA, acctA, ""), StatusTracked, true},
+		{"neither recorded: weaker", natIdent(natA, "", ""), StatusTracked, true},
+		{"recorded account differs", natIdent(natA, acctB, euw1), StatusNoMatch, false},
+		{"recorded region differs", natIdent(natA, acctA, use1), StatusNoMatch, false},
+		{"recorded region differs, no account", natIdent(natA, "", use1), StatusNoMatch, false},
+		{"recreated: new ID", natIdent("nat-0bbbbbbbbbbbbbbb2", acctA, euw1), StatusNoMatch, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res := Run([]discover.Instance{natInst(natA)}, []Source{src("a", "L1", 1, tt.id)})
+			f := res.Findings[0]
+			if f.Status != tt.status {
+				t.Fatalf("status = %s, want %s", f.Status, tt.status)
+			}
+			if tt.status == StatusTracked && (f.Matches[0].MatchedOn != KeyResourceID || f.Matches[0].Weak != tt.weak) {
+				t.Errorf("match = %+v", f.Matches[0])
+			}
+			checkWarnings(t, "finding", f.Warnings, nil)
+		})
+	}
+}

@@ -127,9 +127,9 @@
       "type": "object",
       "required": ["resource_type", "status", "partition", "account_id", "region", "arn", "identifier", "resource_id", "import_id", "engine", "engine_version", "class", "instance_status", "tags", "matches", "warnings"],
       "properties": {
-        "resource_type": { "type": "string", "description": "Terraform resource type: aws_db_instance, aws_lb, aws_s3_bucket or aws_lambda_function" },
-        "kind": { "type": "string", "description": "short label: rds, alb, nlb, gwlb, s3, lambda" },
-        "details": { "type": "object", "additionalProperties": { "type": "string" }, "description": "type-specific details: scheme and vpc_id for load balancers; runtime, package_type, architecture and last_modified for Lambda functions" },
+        "resource_type": { "type": "string", "description": "Terraform resource type: aws_db_instance, aws_lb, aws_s3_bucket, aws_lambda_function or aws_nat_gateway" },
+        "kind": { "type": "string", "description": "short label: rds, alb, nlb, gwlb, s3, lambda, nat" },
+        "details": { "type": "object", "additionalProperties": { "type": "string" }, "description": "type-specific details: scheme and vpc_id for load balancers; runtime, package_type, architecture and last_modified for Lambda functions; name, vpc_id, availability_mode, connectivity_type and subnet_id (zonal only) for NAT gateways" },
         "status": { "enum": ["tracked", "no_match", "unable_to_verify", "not_covered"] },
         "not_covered_reason": { "type": "string" },
         "partition": { "type": "string" },
@@ -157,7 +157,7 @@
               "lifecycle": { "enum": ["current", "tainted", "deposed"] },
               "deposed_key": { "type": "string" },
               "matched_on": { "enum": ["resource_id", "arn", "identifier"] },
-              "weak": { "type": "boolean", "description": "true when the match could not use the resource type's strongest identity (resource_id for RDS, the ARN for load balancers and Lambda functions, bucket name plus recorded region for S3)" },
+              "weak": { "type": "boolean", "description": "true when the match could not use the resource type's strongest identity (resource_id for RDS, the ARN for load balancers and Lambda functions, bucket name plus recorded region for S3, gateway ID plus recorded account and region for NAT gateways)" },
               "renamed": { "type": "boolean" }
             }
           }

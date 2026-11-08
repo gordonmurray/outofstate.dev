@@ -1,0 +1,630 @@
+{
+  "version": 4,
+  "terraform_version": "1.17.1",
+  "serial": 1,
+  "lineage": "nat-lineage",
+  "outputs": {},
+  "resources": [
+    {
+      "mode": "managed",
+      "type": "aws_nat_gateway",
+      "name": "a",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "index_key": 0,
+          "schema_version": 0,
+          "attributes": {
+            "allocation_id": "eipalloc-1",
+            "association_id": "eipassoc-1",
+            "auto_provision_zones": null,
+            "auto_scaling_ips": null,
+            "availability_mode": "zonal",
+            "availability_zone_address": [],
+            "connectivity_type": "public",
+            "id": "nat-0000000000000000a",
+            "network_interface_id": "eni-1",
+            "private_ip": "10.0.0.5",
+            "public_ip": "203.0.113.5",
+            "region": "eu-west-1",
+            "regional_nat_gateway_address": [],
+            "route_table_id": "",
+            "secondary_allocation_ids": [],
+            "subnet_id": "subnet-1",
+            "tags": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "tags_all": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "timeouts": null,
+            "vpc_id": "vpc-1"
+          },
+          "sensitive_attributes": [],
+          "identity_schema_version": 0,
+          "identity": {
+            "account_id": "123456789012",
+            "region": "eu-west-1",
+            "id": "nat-0000000000000000a"
+          }
+        }
+      ],
+      "module": "module.network"
+    },
+    {
+      "mode": "managed",
+      "type": "aws_nat_gateway",
+      "name": "regional",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "allocation_id": "",
+            "association_id": "eipassoc-1",
+            "auto_provision_zones": null,
+            "auto_scaling_ips": null,
+            "availability_mode": "regional",
+            "availability_zone_address": [],
+            "connectivity_type": "public",
+            "id": "nat-0000000000000000b",
+            "network_interface_id": "eni-1",
+            "private_ip": "",
+            "public_ip": "",
+            "region": "eu-west-1",
+            "regional_nat_gateway_address": [],
+            "route_table_id": "",
+            "secondary_allocation_ids": [],
+            "subnet_id": "",
+            "tags": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "tags_all": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "timeouts": null,
+            "vpc_id": "vpc-1"
+          },
+          "sensitive_attributes": [],
+          "identity_schema_version": 0,
+          "identity": {
+            "account_id": "123456789012",
+            "region": "eu-west-1",
+            "id": "nat-0000000000000000b"
+          }
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_nat_gateway",
+      "name": "region_attr_only",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "allocation_id": "eipalloc-1",
+            "association_id": "eipassoc-1",
+            "auto_provision_zones": null,
+            "auto_scaling_ips": null,
+            "availability_mode": "zonal",
+            "availability_zone_address": [],
+            "connectivity_type": "public",
+            "id": "nat-0000000000000000c",
+            "network_interface_id": "eni-1",
+            "private_ip": "10.0.0.5",
+            "public_ip": "203.0.113.5",
+            "region": "eu-west-1",
+            "regional_nat_gateway_address": [],
+            "route_table_id": "",
+            "secondary_allocation_ids": [],
+            "subnet_id": "subnet-1",
+            "tags": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "tags_all": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "timeouts": null,
+            "vpc_id": "vpc-1"
+          },
+          "sensitive_attributes": []
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_nat_gateway",
+      "name": "identity_region_only",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "allocation_id": "eipalloc-1",
+            "association_id": "eipassoc-1",
+            "auto_provision_zones": null,
+            "auto_scaling_ips": null,
+            "availability_mode": "zonal",
+            "availability_zone_address": [],
+            "connectivity_type": "public",
+            "id": "nat-0000000000000000d",
+            "network_interface_id": "eni-1",
+            "private_ip": "10.0.0.5",
+            "public_ip": "203.0.113.5",
+            "region": "",
+            "regional_nat_gateway_address": [],
+            "route_table_id": "",
+            "secondary_allocation_ids": [],
+            "subnet_id": "subnet-1",
+            "tags": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "tags_all": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "timeouts": null,
+            "vpc_id": "vpc-1"
+          },
+          "sensitive_attributes": [],
+          "identity_schema_version": 0,
+          "identity": {
+            "region": "eu-west-2",
+            "id": "nat-0000000000000000d"
+          }
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_nat_gateway",
+      "name": "legacy",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes_flat": {
+            "id": "nat-0000000000000000e",
+            "subnet_id": "subnet-1",
+            "tags.secret": "OOS-SECRET-MARKER"
+          }
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_nat_gateway",
+      "name": "no_id",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "allocation_id": "eipalloc-1",
+            "association_id": "eipassoc-1",
+            "auto_provision_zones": null,
+            "auto_scaling_ips": null,
+            "availability_mode": "zonal",
+            "availability_zone_address": [],
+            "connectivity_type": "public",
+            "id": "",
+            "network_interface_id": "eni-1",
+            "private_ip": "10.0.0.5",
+            "public_ip": "203.0.113.5",
+            "region": "eu-west-1",
+            "regional_nat_gateway_address": [],
+            "route_table_id": "",
+            "secondary_allocation_ids": [],
+            "subnet_id": "subnet-1",
+            "tags": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "tags_all": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "timeouts": null,
+            "vpc_id": "vpc-1"
+          },
+          "sensitive_attributes": []
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_nat_gateway",
+      "name": "not_a_gateway",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "allocation_id": "eipalloc-1",
+            "association_id": "eipassoc-1",
+            "auto_provision_zones": null,
+            "auto_scaling_ips": null,
+            "availability_mode": "zonal",
+            "availability_zone_address": [],
+            "connectivity_type": "public",
+            "id": "igw-0123456789abcdef0",
+            "network_interface_id": "eni-1",
+            "private_ip": "10.0.0.5",
+            "public_ip": "203.0.113.5",
+            "region": "eu-west-1",
+            "regional_nat_gateway_address": [],
+            "route_table_id": "",
+            "secondary_allocation_ids": [],
+            "subnet_id": "subnet-1",
+            "tags": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "tags_all": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "timeouts": null,
+            "vpc_id": "vpc-1"
+          },
+          "sensitive_attributes": []
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_nat_gateway",
+      "name": "identity_disagrees",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "allocation_id": "eipalloc-1",
+            "association_id": "eipassoc-1",
+            "auto_provision_zones": null,
+            "auto_scaling_ips": null,
+            "availability_mode": "zonal",
+            "availability_zone_address": [],
+            "connectivity_type": "public",
+            "id": "nat-0000000000000000f",
+            "network_interface_id": "eni-1",
+            "private_ip": "10.0.0.5",
+            "public_ip": "203.0.113.5",
+            "region": "eu-west-1",
+            "regional_nat_gateway_address": [],
+            "route_table_id": "",
+            "secondary_allocation_ids": [],
+            "subnet_id": "subnet-1",
+            "tags": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "tags_all": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "timeouts": null,
+            "vpc_id": "vpc-1"
+          },
+          "sensitive_attributes": [],
+          "identity_schema_version": 0,
+          "identity": {
+            "account_id": "123456789012",
+            "region": "eu-west-1",
+            "id": "nat-00000000000000009"
+          }
+        }
+      ]
+    },
+    {
+      "mode": "data",
+      "type": "aws_nat_gateway",
+      "name": "existing",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "allocation_id": "eipalloc-1",
+            "association_id": "eipassoc-1",
+            "auto_provision_zones": null,
+            "auto_scaling_ips": null,
+            "availability_mode": "zonal",
+            "availability_zone_address": [],
+            "connectivity_type": "public",
+            "id": "nat-00000000000000007",
+            "network_interface_id": "eni-1",
+            "private_ip": "10.0.0.5",
+            "public_ip": "203.0.113.5",
+            "region": "eu-west-1",
+            "regional_nat_gateway_address": [],
+            "route_table_id": "",
+            "secondary_allocation_ids": [],
+            "subnet_id": "subnet-1",
+            "tags": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "tags_all": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "timeouts": null,
+            "vpc_id": "vpc-1"
+          },
+          "sensitive_attributes": []
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_eip",
+      "name": "ip",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "id": "nat-00000000000000008",
+            "public_ip": "203.0.113.5"
+          },
+          "sensitive_attributes": []
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_nat_gateway",
+      "name": "region_conflict",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "allocation_id": "eipalloc-1",
+            "association_id": "eipassoc-1",
+            "auto_provision_zones": null,
+            "auto_scaling_ips": null,
+            "availability_mode": "zonal",
+            "availability_zone_address": [],
+            "connectivity_type": "public",
+            "id": "nat-00000000000000010",
+            "network_interface_id": "eni-1",
+            "private_ip": "10.0.0.5",
+            "public_ip": "203.0.113.5",
+            "region": "eu-west-1",
+            "regional_nat_gateway_address": [],
+            "route_table_id": "",
+            "secondary_allocation_ids": [],
+            "subnet_id": "subnet-1",
+            "tags": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "tags_all": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "timeouts": null,
+            "vpc_id": "vpc-1"
+          },
+          "sensitive_attributes": [],
+          "identity_schema_version": 0,
+          "identity": {
+            "account_id": "123456789012",
+            "region": "us-east-1",
+            "id": "nat-00000000000000010"
+          }
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_nat_gateway",
+      "name": "bad_account",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "allocation_id": "eipalloc-1",
+            "association_id": "eipassoc-1",
+            "auto_provision_zones": null,
+            "auto_scaling_ips": null,
+            "availability_mode": "zonal",
+            "availability_zone_address": [],
+            "connectivity_type": "public",
+            "id": "nat-00000000000000011",
+            "network_interface_id": "eni-1",
+            "private_ip": "10.0.0.5",
+            "public_ip": "203.0.113.5",
+            "region": "eu-west-1",
+            "regional_nat_gateway_address": [],
+            "route_table_id": "",
+            "secondary_allocation_ids": [],
+            "subnet_id": "subnet-1",
+            "tags": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "tags_all": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "timeouts": null,
+            "vpc_id": "vpc-1"
+          },
+          "sensitive_attributes": [],
+          "identity_schema_version": 0,
+          "identity": {
+            "account_id": "not-an-account",
+            "region": "eu-west-1",
+            "id": "nat-00000000000000011"
+          }
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_nat_gateway",
+      "name": "numeric_account",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "allocation_id": "eipalloc-1",
+            "association_id": "eipassoc-1",
+            "auto_provision_zones": null,
+            "auto_scaling_ips": null,
+            "availability_mode": "zonal",
+            "availability_zone_address": [],
+            "connectivity_type": "public",
+            "id": "nat-00000000000000012",
+            "network_interface_id": "eni-1",
+            "private_ip": "10.0.0.5",
+            "public_ip": "203.0.113.5",
+            "region": "eu-west-1",
+            "regional_nat_gateway_address": [],
+            "route_table_id": "",
+            "secondary_allocation_ids": [],
+            "subnet_id": "subnet-1",
+            "tags": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "tags_all": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "timeouts": null,
+            "vpc_id": "vpc-1"
+          },
+          "sensitive_attributes": [],
+          "identity_schema_version": 0,
+          "identity": {
+            "account_id": 123456789012,
+            "region": "eu-west-1",
+            "id": "nat-00000000000000012"
+          }
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_nat_gateway",
+      "name": "bad_identity_shape",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "allocation_id": "eipalloc-1",
+            "association_id": "eipassoc-1",
+            "auto_provision_zones": null,
+            "auto_scaling_ips": null,
+            "availability_mode": "zonal",
+            "availability_zone_address": [],
+            "connectivity_type": "public",
+            "id": "nat-00000000000000013",
+            "network_interface_id": "eni-1",
+            "private_ip": "10.0.0.5",
+            "public_ip": "203.0.113.5",
+            "region": "eu-west-1",
+            "regional_nat_gateway_address": [],
+            "route_table_id": "",
+            "secondary_allocation_ids": [],
+            "subnet_id": "subnet-1",
+            "tags": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "tags_all": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "timeouts": null,
+            "vpc_id": "vpc-1"
+          },
+          "sensitive_attributes": [],
+          "identity_schema_version": 0,
+          "identity": "not an object"
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_nat_gateway",
+      "name": "blank_identity",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "allocation_id": "eipalloc-1",
+            "association_id": "eipassoc-1",
+            "auto_provision_zones": null,
+            "auto_scaling_ips": null,
+            "availability_mode": "zonal",
+            "availability_zone_address": [],
+            "connectivity_type": "public",
+            "id": "nat-00000000000000020",
+            "network_interface_id": "eni-1",
+            "private_ip": "10.0.0.5",
+            "public_ip": "203.0.113.5",
+            "region": "",
+            "regional_nat_gateway_address": [],
+            "route_table_id": "",
+            "secondary_allocation_ids": [],
+            "subnet_id": "subnet-1",
+            "tags": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "tags_all": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "timeouts": null,
+            "vpc_id": "vpc-1"
+          },
+          "sensitive_attributes": [],
+          "identity_schema_version": 0,
+          "identity": {
+            "account_id": "",
+            "region": "",
+            "id": "nat-00000000000000020"
+          }
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_nat_gateway",
+      "name": "null_identity",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "allocation_id": "eipalloc-1",
+            "association_id": "eipassoc-1",
+            "auto_provision_zones": null,
+            "auto_scaling_ips": null,
+            "availability_mode": "zonal",
+            "availability_zone_address": [],
+            "connectivity_type": "public",
+            "id": "nat-00000000000000021",
+            "network_interface_id": "eni-1",
+            "private_ip": "10.0.0.5",
+            "public_ip": "203.0.113.5",
+            "region": "",
+            "regional_nat_gateway_address": [],
+            "route_table_id": "",
+            "secondary_allocation_ids": [],
+            "subnet_id": "subnet-1",
+            "tags": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "tags_all": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "timeouts": null,
+            "vpc_id": "vpc-1"
+          },
+          "sensitive_attributes": [],
+          "identity_schema_version": 0,
+          "identity": {
+            "account_id": null,
+            "region": null,
+            "id": "nat-00000000000000021"
+          }
+        }
+      ]
+    }
+  ]
+}

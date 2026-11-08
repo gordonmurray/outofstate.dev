@@ -311,6 +311,15 @@ func finding(f match.Finding) report.Finding {
 			"architecture": in.Architecture, "last_modified": in.LastModified,
 		}
 	}
+	if in.TerraformType() == discover.TypeNATGateway {
+		rf.Details = map[string]string{
+			"name": in.Tags["Name"], "vpc_id": in.VPCID,
+			"availability_mode": in.AvailabilityMode, "connectivity_type": in.ConnectivityType,
+		}
+		if in.SubnetID != "" { // regional gateways have no subnet
+			rf.Details["subnet_id"] = in.SubnetID
+		}
+	}
 	if rf.Kind == "" {
 		rf.Kind = discover.KindRDS
 	}

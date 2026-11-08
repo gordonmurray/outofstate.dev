@@ -77,6 +77,8 @@ type ProblemKind string
 const (
 	ProblemMissingARN       ProblemKind = "missing_arn"
 	ProblemInvalidARN       ProblemKind = "invalid_arn"
+	ProblemMissingID        ProblemKind = "missing_id"
+	ProblemInvalidID        ProblemKind = "invalid_id"
 	ProblemUnreadableObject ProblemKind = "unreadable_object"
 	// A resource whose mode, type or name could not be decoded. It might be
 	// an aws_db_instance, so the source cannot be trusted as complete.
@@ -132,6 +134,7 @@ var supportedTypes = map[string]string{
 	"aws_s3_bucket":   "aws_s3_bucket",
 
 	"aws_lambda_function": "aws_lambda_function",
+	"aws_nat_gateway":     "aws_nat_gateway",
 }
 
 // Raw state shapes. Only the fields oos needs are declared, so everything
@@ -170,7 +173,7 @@ type rawAttributes struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`   // aws_lb
 	Bucket     string `json:"bucket"` // aws_s3_bucket
-	Region     string `json:"region"` // aws_s3_bucket: the bucket's region
+	Region     string `json:"region"` // aws_s3_bucket, aws_nat_gateway
 	Identifier string `json:"identifier"`
 	ResourceID string `json:"resource_id"`
 }
@@ -180,6 +183,7 @@ type rawIdentity struct {
 	Region     string `json:"region"`
 	Identifier string `json:"identifier"`
 	Bucket     string `json:"bucket"`
+	ID         string `json:"id"` // aws_nat_gateway
 }
 
 // Parse reads one state snapshot, as printed by "terraform state pull" or
@@ -256,13 +260,16 @@ func identity(typ, addr string, inst rawInstance) (Identity, ProblemKind) {
 	case "aws_lb":
 		return lbIdentity(id, attrs)
 	case "aws_s3_bucket":
-		var ri rawIdentity
-		if inst.IdentitySchemaVersion == 0 && len(inst.Identity) > 0 && string(inst.Identity) != "null" {
-			_ = json.Unmarshal(inst.Identity, &ri)
-		}
+		ri, _ := readIdentity(inst)
 		return bucketIdentity(id, attrs, ri)
 	case "aws_lambda_function":
 		return lambdaIdentity(id, attrs)
+	case "aws_nat_gateway":
+		ri, ok := readIdentity(inst)
+		if !ok {
+			return Identity{}, ProblemUnreadableObject
+		}
+		return natIdentity(id, attrs, ri)
 	}
 
 	normalise(&id, attrs)
@@ -309,6 +316,56 @@ func lbIdentity(id Identity, a rawAttributes) (Identity, ProblemKind) {
 		id.Identifier = arn.Name
 	}
 	id.Partition, id.Region, id.AccountID = arn.Partition, arn.Region, arn.AccountID
+	return id, ""
+}
+
+// readIdentity decodes the Terraform resource identity. Only identity schema
+// version 0 is understood; anything else, or no identity, gives an empty one.
+// It returns false when an identity is present but cannot be decoded.
+func readIdentity(inst rawInstance) (rawIdentity, bool) {
+	var ri rawIdentity
+	if inst.IdentitySchemaVersion == 0 && len(inst.Identity) > 0 && string(inst.Identity) != "null" {
+		if err := json.Unmarshal(inst.Identity, &ri); err != nil {
+			return ri, false
+		}
+	}
+	return ri, true
+}
+
+// natIdentity reads an aws_nat_gateway object. Its identity is the gateway ID
+// in "id". The resource has no ARN, so the state does not always say where
+// the gateway is: the account comes from the resource identity (provider
+// versions that record one), and the region from the "region" attribute
+// (provider v6) or the resource identity. When they are absent they stay
+// empty, and matching treats the entry as weaker (see match.compare). The
+// partition is never recorded.
+//
+// Absent scope is normal in older state. Scope that is recorded but malformed
+// or contradictory is not, and must not be read as absent: it makes the object
+// unreadable, so the gateway is reported as unable to verify.
+func natIdentity(id Identity, a rawAttributes, ri rawIdentity) (Identity, ProblemKind) {
+	if a.ID == "" {
+		return Identity{}, ProblemMissingID
+	}
+	if !natIDRE.MatchString(a.ID) || (ri.ID != "" && ri.ID != a.ID) {
+		return Identity{}, ProblemInvalidID
+	}
+	if a.Region != "" && ri.Region != "" && a.Region != ri.Region {
+		return Identity{}, ProblemUnreadableObject
+	}
+	id.ResourceID, id.Identifier = a.ID, a.ID
+	id.Region = a.Region
+	if id.Region == "" {
+		id.Region = ri.Region
+	}
+	if id.Region != "" && !regionRE.MatchString(id.Region) {
+		return Identity{}, ProblemUnreadableObject
+	}
+	if ri.AccountID != "" && !accountRE.MatchString(ri.AccountID) {
+		return Identity{}, ProblemUnreadableObject
+	}
+	id.AccountID = ri.AccountID
+	id.IdentityAccountID, id.IdentityRegion, id.IdentityIdentifier = ri.AccountID, ri.Region, ri.ID
 	return id, ""
 }
 
