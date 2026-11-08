@@ -305,6 +305,12 @@ func finding(f match.Finding) report.Finding {
 		rf.ImportID = in.ARN
 		rf.Details = map[string]string{"scheme": in.Scheme, "vpc_id": in.VPCID}
 	}
+	if in.TerraformType() == discover.TypeLambdaFunction {
+		rf.Details = map[string]string{
+			"runtime": in.Runtime, "package_type": in.PackageType,
+			"architecture": in.Architecture, "last_modified": in.LastModified,
+		}
+	}
 	if rf.Kind == "" {
 		rf.Kind = discover.KindRDS
 	}

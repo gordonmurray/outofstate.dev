@@ -87,7 +87,7 @@ Exit codes:
 	f := cmd.Flags()
 	f.StringVar(&o.profile, "profile", "", "AWS profile for discovery and cost calls (default: the AWS SDK default chain)")
 	f.StringArrayVar(&o.regions, "region", nil, "region to scan, repeatable (default: the region from your AWS config)")
-	f.StringArrayVar(&o.types, "type", nil, "resource type to check, repeatable: rds, lb, s3 (default: all)")
+	f.StringArrayVar(&o.types, "type", nil, "resource type to check, repeatable: rds, lb, s3, lambda (default: all)")
 	f.StringArrayVar(&o.sources, "source", nil, "initialised Terraform working directory, repeatable (default: . when no --state-file is given)")
 	f.StringArrayVar(&o.stateFiles, "state-file", nil, "Terraform state JSON file, repeatable")
 	f.StringVar(&o.tfBinary, "tf-binary", "terraform", "binary used for 'state pull' (for example tofu)")
@@ -202,10 +202,11 @@ var typeNames = map[string]string{
 	"lb": discover.TypeLoadBalancer, "alb": discover.TypeLoadBalancer, "nlb": discover.TypeLoadBalancer,
 	"aws_lb": discover.TypeLoadBalancer, "aws_alb": discover.TypeLoadBalancer,
 	"s3": discover.TypeS3Bucket, "aws_s3_bucket": discover.TypeS3Bucket,
+	"lambda": discover.TypeLambdaFunction, "aws_lambda_function": discover.TypeLambdaFunction,
 }
 
 // allTypes is the default for --type, in report order.
-var allTypes = []string{discover.TypeDBInstance, discover.TypeLoadBalancer, discover.TypeS3Bucket}
+var allTypes = []string{discover.TypeDBInstance, discover.TypeLoadBalancer, discover.TypeS3Bucket, discover.TypeLambdaFunction}
 
 func resolveTypes(values []string) ([]string, error) {
 	if len(values) == 0 {
@@ -216,7 +217,7 @@ func resolveTypes(values []string) ([]string, error) {
 		for _, part := range strings.Split(v, ",") {
 			t, ok := typeNames[strings.ToLower(strings.TrimSpace(part))]
 			if !ok {
-				return nil, fmt.Errorf("unknown --type %q: use rds, lb or s3", part)
+				return nil, fmt.Errorf("unknown --type %q: use rds, lb, s3 or lambda", part)
 			}
 			if !slices.Contains(out, t) {
 				out = append(out, t)

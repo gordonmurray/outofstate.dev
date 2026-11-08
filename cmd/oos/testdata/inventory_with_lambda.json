@@ -1,0 +1,106 @@
+{
+  "partition": "aws",
+  "account_id": "123456789012",
+  "regions": [
+    {
+      "region": "eu-west-1",
+      "type": "aws_lambda_function",
+      "instances": [
+        {
+          "type": "aws_lambda_function",
+          "arn": "arn:aws:lambda:eu-west-1:123456789012:function:orders-api",
+          "identifier": "orders-api",
+          "runtime": "python3.13",
+          "package_type": "Zip",
+          "architecture": "arm64",
+          "last_modified": "2025-05-01T08:00:00Z",
+          "tags": {},
+          "environment": {
+            "variables": {
+              "API_KEY": "OOS-SECRET-MARKER"
+            }
+          }
+        },
+        {
+          "type": "aws_lambda_function",
+          "arn": "arn:aws:lambda:eu-west-1:123456789012:function:nightly-cleanup",
+          "identifier": "nightly-cleanup",
+          "runtime": "python3.13",
+          "package_type": "Zip",
+          "architecture": "arm64",
+          "last_modified": "2025-05-01T08:00:00Z",
+          "tags": {
+            "team": "ops"
+          },
+          "environment": {
+            "variables": {
+              "API_KEY": "OOS-SECRET-MARKER"
+            }
+          }
+        },
+        {
+          "type": "aws_lambda_function",
+          "arn": "arn:aws:lambda:eu-west-1:123456789012:function:alias-only",
+          "identifier": "alias-only",
+          "runtime": "python3.13",
+          "package_type": "Zip",
+          "architecture": "arm64",
+          "last_modified": "2025-05-01T08:00:00Z",
+          "tags": {},
+          "environment": {
+            "variables": {
+              "API_KEY": "OOS-SECRET-MARKER"
+            }
+          }
+        },
+        {
+          "type": "aws_lambda_function",
+          "arn": "arn:aws:lambda:eu-west-1:123456789012:function:sam-webhook",
+          "identifier": "sam-webhook",
+          "runtime": "python3.13",
+          "package_type": "Zip",
+          "architecture": "arm64",
+          "last_modified": "2025-05-01T08:00:00Z",
+          "tags": {
+            "aws:cloudformation:stack-name": "webhooks"
+          },
+          "environment": {
+            "variables": {
+              "API_KEY": "OOS-SECRET-MARKER"
+            }
+          }
+        },
+        {
+          "type": "aws_lambda_function",
+          "arn": "arn:aws:lambda:eu-west-1:123456789012:function:aws-controltower-NotificationForwarder",
+          "identifier": "aws-controltower-NotificationForwarder",
+          "runtime": "python3.13",
+          "package_type": "Zip",
+          "architecture": "arm64",
+          "last_modified": "2025-05-01T08:00:00Z",
+          "tags": {},
+          "environment": {
+            "variables": {
+              "API_KEY": "OOS-SECRET-MARKER"
+            }
+          }
+        },
+        {
+          "type": "aws_lambda_function",
+          "arn": "arn:aws:lambda:eu-west-1:123456789012:function:container-job",
+          "identifier": "container-job",
+          "runtime": "",
+          "package_type": "Image",
+          "architecture": "x86_64",
+          "last_modified": "2025-05-01T08:00:00Z",
+          "tags": {},
+          "environment": {
+            "variables": {
+              "API_KEY": "OOS-SECRET-MARKER"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

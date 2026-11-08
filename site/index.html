@@ -188,16 +188,16 @@ Scan: complete
 
 <span class="t-bold">2 import candidate(s): resources with no match in the supplied states</span>
 
-  <span class="t-grey">analytics-db            </span> eu-west-1       rds   db.r6g.large     postgres 16.2            available    created 2025-03-02
-  <span class="t-grey">legacy-alb              </span> eu-west-1       alb   internal         vpc-0a1b2c3d             active       created 2024-01-01
+  <span class="t-grey">analytics-db            </span> eu-west-1       rds    db.r6g.large     postgres 16.2            available    created 2025-03-02
+  <span class="t-grey">legacy-alb              </span> eu-west-1       alb    internal         vpc-0a1b2c3d             active       created 2024-01-01
 
 <span class="t-green">3 tracked in state</span>
-  <span class="t-green">orders-db               </span> eu-west-1       rds   ./app-infra (default) aws_db_instance.orders (resource_id)
-  <span class="t-green">reports-db              </span> eu-west-1       rds   ./shared-infra (prod) aws_db_instance.reports (resource_id)
-  <span class="t-green">web-alb                 </span> eu-west-1       alb   ./app-infra (default) aws_lb.web (arn)
+  <span class="t-green">orders-db               </span> eu-west-1       rds    ./app-infra (default) aws_db_instance.orders (resource_id)
+  <span class="t-green">reports-db              </span> eu-west-1       rds    ./shared-infra (prod) aws_db_instance.reports (resource_id)
+  <span class="t-green">web-alb                 </span> eu-west-1       alb    ./app-infra (default) aws_lb.web (arn)
 
 <span class="t-dim">1 not covered</span>
-  <span class="t-dim">billing-cluster-1        eu-west-1       rds   member of an Aurora or Multi-AZ DB cluster</span>
+  <span class="t-dim">billing-cluster-1        eu-west-1       rds    member of an Aurora or Multi-AZ DB cluster</span>
 
 Import candidates need a configuration review and a terraform plan before applying.
 Use --format json for full details (ARNs, resource and import IDs, tags).</pre>
@@ -264,8 +264,13 @@ Use --format json for full details (ARNs, resource and import IDs, tags).</pre>
           <h3>S3 general purpose buckets</h3>
           <p>Matched on bucket name against <code>aws_s3_bucket</code>, and on region when the state records it. Buckets have no lasting ID, so one recreated with the same name in the same region looks the same.</p>
         </div>
+        <div class="card">
+          <span class="tag">lambda</span>
+          <h3>Lambda functions</h3>
+          <p>Matched on the function ARN against <code>aws_lambda_function</code>. Functions have no lasting ID, so one recreated with the same name looks the same. Environment variables are never read into a report.</p>
+        </div>
       </div>
-      <p class="muted" style="margin-top:22px">More resource types are on the way. When a resource’s tags show that CloudFormation, Elastic Beanstalk or Kubernetes manages it (or an S3 bucket’s name follows such a tool’s convention), the report adds a warning so you check there before importing.</p>
+      <p class="muted" style="margin-top:22px">More resource types are on the way. When a resource’s tags show that CloudFormation, Elastic Beanstalk or Kubernetes manages it (or an S3 bucket’s or Lambda function’s name follows a tool’s convention), the report adds a warning so you check there before importing.</p>
     </section>
 
     <section id="install">

@@ -130,9 +130,9 @@ func TestRowsShowTheRegion(t *testing.T) {
 	for _, want := range []string{
 		"  orders-db                eu-west-1       ",
 		"  orders-db                us-east-1       ",
-		"  users-db                 us-east-1             a (default) aws_db_instance.x",
+		"  users-db                 us-east-1              a (default) aws_db_instance.x",
 		"                                                 b (default) aws_db_instance.y",
-		"  aurora-1                 eu-west-1             member of",
+		"  aurora-1                 eu-west-1              member of",
 		"  maybe-db                 ap-southeast-3  ",
 	} {
 		if !strings.Contains(out, want) {

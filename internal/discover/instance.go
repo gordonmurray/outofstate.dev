@@ -1,5 +1,6 @@
 // Package discover lists AWS resources: RDS DB instances, Elastic Load
-// Balancing v2 load balancers and S3 general purpose buckets.
+// Balancing v2 load balancers, S3 general purpose buckets and Lambda
+// functions.
 package discover
 
 import (
@@ -14,6 +15,8 @@ const (
 	TypeDBInstance   = "aws_db_instance"
 	TypeLoadBalancer = "aws_lb" // also written as aws_alb in older code
 	TypeS3Bucket     = "aws_s3_bucket"
+	// TypeLambdaFunction is the Terraform type of a Lambda function.
+	TypeLambdaFunction = "aws_lambda_function"
 )
 
 // Kinds are short labels for reports.
@@ -23,6 +26,8 @@ const (
 	KindNLB  = "nlb"
 	KindGWLB = "gwlb"
 	KindS3   = "s3"
+	// KindLambda is the report label of a Lambda function.
+	KindLambda = "lambda"
 )
 
 // Instance is one discovered AWS resource. The name is historical: it holds
@@ -49,6 +54,13 @@ type Instance struct {
 	Scheme string // internet-facing, internal
 	VPCID  string
 
+	// Lambda details. These are the only fields kept from a ListFunctions
+	// response: environment variables can hold secrets and are never read.
+	Runtime      string // empty for container images
+	PackageType  string // Zip or Image
+	Architecture string // x86_64 or arm64
+	LastModified string // RFC 3339, UTC; empty when AWS sent an unknown format
+
 	Status string // DBInstanceStatus, or load balancer state
 	Tags   map[string]string
 	// TagsUnavailable is set when tags could not be read. It is a warning
@@ -64,7 +76,8 @@ type Instance struct {
 	// Classify. It is a hint for the report, not proof.
 	ManagedBy string
 	// LikelyCreatedBy names a tool whose naming convention the resource
-	// follows (for S3: cdk, cloudformation, elastic_beanstalk). Weaker than
+	// follows (S3: cdk, cloudformation, elastic_beanstalk; Lambda:
+	// control_tower). Weaker than
 	// ManagedBy: a name says nothing about who manages it now.
 	LikelyCreatedBy string
 }
@@ -91,6 +104,7 @@ const (
 	ManagedByElasticBeanstalk = "elastic_beanstalk"
 	ManagedByKubernetes       = "kubernetes"
 	ManagedByCDK              = "cdk"
+	ManagedByControlTower     = "control_tower"
 )
 
 // Classify sets NotCovered and ManagedBy. Ordinary Multi-AZ DB instances
@@ -116,12 +130,28 @@ func Classify(inst *Instance) {
 		}
 	case TypeS3Bucket:
 		inst.Kind = KindS3
+	case TypeLambdaFunction:
+		inst.Kind = KindLambda
 	}
 	inst.ManagedBy = managedBy(inst.Tags)
 	inst.LikelyCreatedBy = ""
-	if inst.ManagedBy == "" && inst.TerraformType() == TypeS3Bucket {
-		inst.LikelyCreatedBy = bucketCreatedBy(inst.Identifier)
+	if inst.ManagedBy == "" {
+		switch inst.TerraformType() {
+		case TypeS3Bucket:
+			inst.LikelyCreatedBy = bucketCreatedBy(inst.Identifier)
+		case TypeLambdaFunction:
+			inst.LikelyCreatedBy = functionCreatedBy(inst.Identifier)
+		}
 	}
+}
+
+// functionCreatedBy recognises functions that account-setup tooling creates
+// with well-known names. It is a hint for the report, not proof.
+func functionCreatedBy(name string) string {
+	if strings.HasPrefix(name, "aws-controltower-") {
+		return ManagedByControlTower
+	}
+	return ""
 }
 
 // cdkAssetsBucketRE matches CDK bootstrap asset buckets, for example

@@ -1,0 +1,67 @@
+{
+  "version": 4,
+  "terraform_version": "1.17.1",
+  "serial": 1,
+  "lineage": "lambda-lineage",
+  "outputs": {},
+  "resources": [
+    {
+      "mode": "managed",
+      "type": "aws_lambda_function",
+      "name": "orders",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "architectures": [
+              "arm64"
+            ],
+            "arn": "arn:aws:lambda:eu-west-1:123456789012:function:orders-api",
+            "description": "",
+            "environment": [
+              {
+                "variables": {
+                  "API_KEY": "OOS-SECRET-MARKER"
+                }
+              }
+            ],
+            "function_name": "orders-api",
+            "handler": "app.handler",
+            "id": "orders-api",
+            "invoke_arn": "arn:aws:apigateway:eu-west-1:lambda:path/2015-03-31/functions/arn:aws:lambda:eu-west-1:123456789012:function:orders-api/invocations",
+            "last_modified": "2025-05-01T08:00:00.000+0000",
+            "package_type": "Zip",
+            "qualified_arn": "arn:aws:lambda:eu-west-1:123456789012:function:orders-api:$LATEST",
+            "region": "eu-west-1",
+            "role": "arn:aws:iam::123456789012:role/OOS-SECRET-MARKER",
+            "runtime": "python3.13",
+            "tags": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "version": "$LATEST"
+          },
+          "sensitive_attributes": []
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_lambda_alias",
+      "name": "live",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "arn": "arn:aws:lambda:eu-west-1:123456789012:function:alias-only:live",
+            "function_name": "alias-only",
+            "name": "live",
+            "id": "arn:aws:lambda:eu-west-1:123456789012:function:alias-only:live"
+          },
+          "sensitive_attributes": []
+        }
+      ]
+    }
+  ]
+}

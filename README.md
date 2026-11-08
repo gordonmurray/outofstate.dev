@@ -2,7 +2,7 @@
 
 Find what's running outside your Terraform. [outofstate.dev](https://outofstate.dev)
 
-`oos` compares the resources in an AWS account with the Terraform states you supply and reports the ones that no state tracks. Supported so far: RDS DB instances, Application/Network Load Balancers and S3 buckets. More will follow.
+`oos` compares the resources in an AWS account with the Terraform states you supply and reports the ones that no state tracks. Supported so far: RDS DB instances, Application/Network Load Balancers, S3 buckets and Lambda functions. More will follow.
 
 `oos` reads Terraform state format version 4 (Terraform 0.12 and later, and OpenTofu).
 
@@ -15,16 +15,16 @@ Scan: complete
 
 2 import candidate(s): resources with no match in the supplied states
 
-  analytics-db             eu-west-1       rds   db.r6g.large     postgres 16.2            available    created 2025-03-02
-  legacy-alb               eu-west-1       alb   internal         vpc-0a1b2c3d             active       created 2024-01-01
+  analytics-db             eu-west-1       rds    db.r6g.large     postgres 16.2            available    created 2025-03-02
+  legacy-alb               eu-west-1       alb    internal         vpc-0a1b2c3d             active       created 2024-01-01
 
 3 tracked in state
-  orders-db                eu-west-1       rds   ./app-infra (default) aws_db_instance.orders (resource_id)
-  reports-db               eu-west-1       rds   ./shared-infra (prod) aws_db_instance.reports (resource_id)
-  web-alb                  eu-west-1       alb   ./app-infra (default) aws_lb.web (arn)
+  orders-db                eu-west-1       rds    ./app-infra (default) aws_db_instance.orders (resource_id)
+  reports-db               eu-west-1       rds    ./shared-infra (prod) aws_db_instance.reports (resource_id)
+  web-alb                  eu-west-1       alb    ./app-infra (default) aws_lb.web (arn)
 
 1 not covered
-  billing-cluster-1        eu-west-1       rds   member of an Aurora or Multi-AZ DB cluster
+  billing-cluster-1        eu-west-1       rds    member of an Aurora or Multi-AZ DB cluster
 
 Import candidates need a configuration review and a terraform plan before applying.
 Use --format json for full details (ARNs, resource and import IDs, tags).
@@ -32,7 +32,7 @@ Use --format json for full details (ARNs, resource and import IDs, tags).
 
 A database and a load balancer have no match in either state and need a look, three resources are tracked (with the state and address that tracks them), and one is outside what `oos` checks so far.
 
-> **Status:** early development. RDS DB instances, load balancers and S3 buckets.
+> **Status:** early development. RDS DB instances, load balancers, S3 buckets and Lambda functions.
 
 ## Quick start
 
@@ -100,7 +100,7 @@ A state file works too, with `--state-file terraform.tfstate` (repeatable).
 |---|---|---|
 | `--profile` | AWS default chain | AWS profile for discovery |
 | `--region` | your profile's region | Region to scan, repeatable |
-| `--type` | all | Resource type to check, repeatable: `rds`, `lb`, `s3` |
+| `--type` | all | Resource type to check, repeatable: `rds`, `lb`, `s3`, `lambda` |
 | `--source` | `.` if no `--source` or `--state-file` | Terraform working directory, repeatable |
 | `--state-file` | | Terraform state JSON file, repeatable |
 | `--tf-binary` | `terraform` | `terraform` or `tofu` |
@@ -117,11 +117,11 @@ A state file works too, with `--state-file terraform.tfstate` (repeatable).
 | **Tracked in state** | A managed `aws_db_instance` in one of your states matches this instance. The report shows which state and address. |
 | **No match found** | No supplied state tracks it, and every state was read fully. These are **import candidates**: review the configuration and run `terraform plan` before importing. |
 | **Unable to verify** | No match, but a state could not be read fully, so the instance might be in it. |
-| **Not covered** | Outside what `oos` checks so far: instances that belong to Aurora or Multi-AZ DB clusters, DocumentDB, Neptune, and Gateway Load Balancers. Classic Load Balancers and S3 directory and table buckets are not checked at all yet. |
+| **Not covered** | Outside what `oos` checks so far: instances that belong to Aurora or Multi-AZ DB clusters, DocumentDB, Neptune, and Gateway Load Balancers. Classic Load Balancers, S3 directory and table buckets, and Lambda versions, aliases, layers and event source mappings are not checked at all yet. |
 
 If you supply several snapshots of the same state (for example a working directory and an older exported copy), only the newest is used, so an old copy cannot make something look tracked. The report says which one it used.
 
-"No match found" means *not in the states you supplied*. The resource may be managed by another state, by another tool, or by hand. When its tags show that CloudFormation, Elastic Beanstalk or Kubernetes (the AWS Load Balancer Controller) manages it, the report says so. When an S3 bucket follows a naming convention those tools use (for example a CDK bootstrap bucket), the report says it was likely created by that tool.
+"No match found" means *not in the states you supplied*. The resource may be managed by another state, by another tool, or by hand. When its tags show that CloudFormation, Elastic Beanstalk or Kubernetes (the AWS Load Balancer Controller) manages it, the report says so. When an S3 bucket or Lambda function follows a naming convention that a tool uses (for example a CDK bootstrap bucket or an AWS Control Tower function), the report says it was likely created by that tool.
 
 ### Supported resource types
 
@@ -130,8 +130,11 @@ If you supply several snapshots of the same state (for example a working directo
 | `rds` | RDS DB instances | `aws_db_instance` | resource ID (`db-…`), falling back to ARN or name only when the state has no resource ID |
 | `lb` | Application and Network Load Balancers | `aws_lb` (and its older name `aws_alb`) | load balancer ARN (a recreated load balancer gets a new one) |
 | `s3` | S3 general purpose buckets owned by the account, in the scanned regions | `aws_s3_bucket` (bucket policies, versioning and other sub-resources do not count) | bucket name, plus the region when the state records it. Buckets have no immutable ID, so a bucket deleted and recreated with the same name in the same region looks the same |
+| `lambda` | Lambda functions (zip and container image), one finding per function | `aws_lambda_function` (aliases, permissions, function URLs, event source mappings and data sources do not count) | unqualified function ARN. Functions have no immutable ID, so a function deleted and recreated with the same name looks the same |
 
 S3 reads the tags of every bucket (one request per bucket) so it can recognise buckets created by other tools. With many buckets this adds a second or two; `--type rds --type lb` skips S3.
+
+Lambda also reads tags one function at a time. AWS allows 15 requests per second across the Lambda API, so `oos` paces its tag requests to about 10 per second in each region: 100 functions take about 10 seconds. If the tags cannot all be read within the two-minute limit for a region, the remaining functions get a warning and are still matched. Use `--type` to leave Lambda out. `oos` never stores or reports environment variables, code locations or role policies.
 
 ### Cost (optional)
 
@@ -171,6 +174,8 @@ These are **all** RDS charges in those regions, not the cost of the import candi
         "elasticloadbalancing:DescribeTags",
         "s3:ListAllMyBuckets",
         "s3:GetBucketTagging",
+        "lambda:ListFunctions",
+        "lambda:ListTags",
         "ce:GetCostAndUsage"
       ],
       "Resource": "*"

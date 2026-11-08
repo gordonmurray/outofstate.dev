@@ -1,0 +1,287 @@
+{
+  "version": 4,
+  "terraform_version": "1.17.1",
+  "serial": 1,
+  "lineage": "lambda-lineage",
+  "outputs": {},
+  "resources": [
+    {
+      "mode": "managed",
+      "type": "aws_lambda_function",
+      "name": "orders",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "architectures": [
+              "arm64"
+            ],
+            "arn": "arn:aws:lambda:eu-west-1:123456789012:function:orders-api",
+            "description": "",
+            "environment": [
+              {
+                "variables": {
+                  "API_KEY": "OOS-SECRET-MARKER"
+                }
+              }
+            ],
+            "function_name": "orders-api",
+            "handler": "app.handler",
+            "id": "orders-api",
+            "invoke_arn": "arn:aws:apigateway:eu-west-1:lambda:path/2015-03-31/functions/arn:aws:lambda:eu-west-1:123456789012:function:orders-api/invocations",
+            "last_modified": "2025-05-01T08:00:00.000+0000",
+            "package_type": "Zip",
+            "qualified_arn": "arn:aws:lambda:eu-west-1:123456789012:function:orders-api:$LATEST",
+            "region": "eu-west-1",
+            "role": "arn:aws:iam::123456789012:role/OOS-SECRET-MARKER",
+            "runtime": "python3.13",
+            "tags": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "version": "$LATEST"
+          },
+          "sensitive_attributes": [],
+          "identity_schema_version": 0,
+          "identity": {
+            "account_id": "123456789012",
+            "region": "eu-west-1",
+            "function_name": "orders-api"
+          }
+        }
+      ],
+      "module": "module.api"
+    },
+    {
+      "mode": "managed",
+      "type": "aws_lambda_function",
+      "name": "job",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "index_key": "nightly",
+          "schema_version": 0,
+          "attributes": {
+            "architectures": [
+              "arm64"
+            ],
+            "arn": "arn:aws:lambda:eu-west-1:123456789012:function:container-job",
+            "description": "",
+            "environment": [
+              {
+                "variables": {
+                  "API_KEY": "OOS-SECRET-MARKER"
+                }
+              }
+            ],
+            "function_name": "container-job",
+            "handler": "",
+            "id": "container-job",
+            "invoke_arn": "arn:aws:apigateway:eu-west-1:lambda:path/2015-03-31/functions/arn:aws:lambda:eu-west-1:123456789012:function:container-job/invocations",
+            "last_modified": "2025-05-01T08:00:00.000+0000",
+            "package_type": "Image",
+            "qualified_arn": "arn:aws:lambda:eu-west-1:123456789012:function:container-job:$LATEST",
+            "region": "eu-west-1",
+            "role": "arn:aws:iam::123456789012:role/OOS-SECRET-MARKER",
+            "runtime": "",
+            "tags": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "version": "$LATEST",
+            "image_uri": "123456789012.dkr.ecr.eu-west-1.amazonaws.com/job:1"
+          },
+          "sensitive_attributes": []
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_lambda_function",
+      "name": "qualified",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "architectures": [
+              "arm64"
+            ],
+            "arn": "arn:aws:lambda:eu-west-1:123456789012:function:qualified:7",
+            "description": "",
+            "environment": [
+              {
+                "variables": {
+                  "API_KEY": "OOS-SECRET-MARKER"
+                }
+              }
+            ],
+            "function_name": "qualified",
+            "handler": "app.handler",
+            "id": "qualified",
+            "invoke_arn": "arn:aws:apigateway:eu-west-1:lambda:path/2015-03-31/functions/arn:aws:lambda:eu-west-1:123456789012:function:qualified/invocations",
+            "last_modified": "2025-05-01T08:00:00.000+0000",
+            "package_type": "Zip",
+            "qualified_arn": "arn:aws:lambda:eu-west-1:123456789012:function:qualified:$LATEST",
+            "region": "eu-west-1",
+            "role": "arn:aws:iam::123456789012:role/OOS-SECRET-MARKER",
+            "runtime": "python3.13",
+            "tags": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "version": "$LATEST"
+          },
+          "sensitive_attributes": []
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_lambda_function",
+      "name": "no_arn",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "architectures": [
+              "arm64"
+            ],
+            "arn": "",
+            "description": "",
+            "environment": [
+              {
+                "variables": {
+                  "API_KEY": "OOS-SECRET-MARKER"
+                }
+              }
+            ],
+            "function_name": "no-arn",
+            "handler": "app.handler",
+            "id": "no-arn",
+            "invoke_arn": "arn:aws:apigateway:eu-west-1:lambda:path/2015-03-31/functions/arn:aws:lambda:eu-west-1:123456789012:function:no-arn/invocations",
+            "last_modified": "2025-05-01T08:00:00.000+0000",
+            "package_type": "Zip",
+            "qualified_arn": "arn:aws:lambda:eu-west-1:123456789012:function:no-arn:$LATEST",
+            "region": "eu-west-1",
+            "role": "arn:aws:iam::123456789012:role/OOS-SECRET-MARKER",
+            "runtime": "python3.13",
+            "tags": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "version": "$LATEST"
+          },
+          "sensitive_attributes": []
+        }
+      ]
+    },
+    {
+      "mode": "data",
+      "type": "aws_lambda_function",
+      "name": "existing",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "architectures": [
+              "arm64"
+            ],
+            "arn": "arn:aws:lambda:eu-west-1:123456789012:function:data-only",
+            "description": "",
+            "environment": [
+              {
+                "variables": {
+                  "API_KEY": "OOS-SECRET-MARKER"
+                }
+              }
+            ],
+            "function_name": "data-only",
+            "handler": "app.handler",
+            "id": "data-only",
+            "invoke_arn": "arn:aws:apigateway:eu-west-1:lambda:path/2015-03-31/functions/arn:aws:lambda:eu-west-1:123456789012:function:data-only/invocations",
+            "last_modified": "2025-05-01T08:00:00.000+0000",
+            "package_type": "Zip",
+            "qualified_arn": "arn:aws:lambda:eu-west-1:123456789012:function:data-only:$LATEST",
+            "region": "eu-west-1",
+            "role": "arn:aws:iam::123456789012:role/OOS-SECRET-MARKER",
+            "runtime": "python3.13",
+            "tags": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "version": "$LATEST"
+          },
+          "sensitive_attributes": []
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_lambda_alias",
+      "name": "live",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "arn": "arn:aws:lambda:eu-west-1:123456789012:function:alias-only:live",
+            "function_name": "alias-only",
+            "name": "live",
+            "id": "arn:aws:lambda:eu-west-1:123456789012:function:alias-only:live"
+          },
+          "sensitive_attributes": []
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_lambda_permission",
+      "name": "allow",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "function_name": "permission-only",
+            "id": "AllowInvoke",
+            "statement_id": "AllowInvoke"
+          },
+          "sensitive_attributes": []
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_lambda_function_url",
+      "name": "url",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "function_arn": "arn:aws:lambda:eu-west-1:123456789012:function:url-only",
+            "function_name": "url-only",
+            "id": "url-only"
+          },
+          "sensitive_attributes": []
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_lambda_event_source_mapping",
+      "name": "queue",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "function_arn": "arn:aws:lambda:eu-west-1:123456789012:function:mapping-only",
+            "function_name": "arn:aws:lambda:eu-west-1:123456789012:function:mapping-only",
+            "id": "uuid"
+          },
+          "sensitive_attributes": []
+        }
+      ]
+    }
+  ]
+}

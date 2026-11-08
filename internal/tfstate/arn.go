@@ -115,3 +115,29 @@ func ParseS3BucketARN(s string) (S3BucketARN, bool) {
 	}
 	return a, true
 }
+
+// LambdaARN is a parsed unqualified Lambda function ARN:
+// arn:<partition>:lambda:<region>:<account>:function:<name>
+type LambdaARN struct {
+	Partition string
+	Region    string
+	AccountID string
+	Name      string
+}
+
+var lambdaNameRE = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+
+// ParseLambdaARN accepts only unqualified function ARNs. Versions and aliases
+// (a ninth segment), layers and event source mappings are rejected.
+func ParseLambdaARN(s string) (LambdaARN, bool) {
+	parts := strings.Split(s, ":")
+	if len(parts) != 7 || parts[0] != "arn" || parts[2] != "lambda" || parts[5] != "function" {
+		return LambdaARN{}, false
+	}
+	a := LambdaARN{Partition: parts[1], Region: parts[3], AccountID: parts[4], Name: parts[6]}
+	if !partitionRE.MatchString(a.Partition) || !regionRE.MatchString(a.Region) ||
+		!accountRE.MatchString(a.AccountID) || !lambdaNameRE.MatchString(a.Name) {
+		return LambdaARN{}, false
+	}
+	return a, true
+}

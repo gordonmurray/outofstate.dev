@@ -547,3 +547,50 @@ func TestParseS3BucketARN(t *testing.T) {
 		}
 	}
 }
+
+func TestLambdaFunctions(t *testing.T) {
+	st := parse(t, "lambda.json")
+	got := byAddress(st)
+	if len(got) != 2 {
+		t.Fatalf("got %v (aliases, permissions, URLs, mappings and data sources must not count)", keys(got))
+	}
+	for addr, name := range map[string]string{
+		`module.api.aws_lambda_function.orders`: "orders-api",
+		`aws_lambda_function.job["nightly"]`:    "container-job",
+	} {
+		id := got[addr]
+		if id.Type != "aws_lambda_function" || id.Identifier != name || id.Partition != "aws" ||
+			id.Region != "eu-west-1" || id.AccountID != "123456789012" ||
+			id.ARN != "arn:aws:lambda:eu-west-1:123456789012:function:"+name {
+			t.Errorf("%s: %+v", addr, id)
+		}
+	}
+	probs := map[string]ProblemKind{}
+	for _, p := range st.Problems {
+		probs[p.Address] = p.Kind
+	}
+	if probs["aws_lambda_function.qualified"] != ProblemInvalidARN || probs["aws_lambda_function.no_arn"] != ProblemMissingARN || len(probs) != 2 {
+		t.Errorf("problems: %+v", st.Problems)
+	}
+}
+
+func TestParseLambdaARN(t *testing.T) {
+	for in, ok := range map[string]bool{
+		"arn:aws:lambda:eu-west-1:123456789012:function:my_fn-1":                    true,
+		"arn:aws-cn:lambda:cn-north-1:123456789012:function:fn":                     true,
+		"arn:aws:lambda:eu-west-1:123456789012:function:fn:7":                       false, // version
+		"arn:aws:lambda:eu-west-1:123456789012:function:fn:live":                    false, // alias
+		"arn:aws:lambda:eu-west-1:123456789012:layer:deps":                          false,
+		"arn:aws:lambda:eu-west-1:123456789012:event-source-mapping:x":              false,
+		"arn:aws:lambda:eu-west-1:123:function:fn":                                  false,
+		"arn:aws:lambda::123456789012:function:fn":                                  false,
+		"arn:aws:lambda:eu-west-1:123456789012:function:bad name":                   false,
+		"arn:aws:lambda:eu-west-1:123456789012:function:":                           false,
+		"arn:aws:rds:eu-west-1:123456789012:function:fn":                            false,
+		"arn:aws:lambda:eu-west-1:123456789012:function:" + strings.Repeat("a", 65): false,
+	} {
+		if _, got := ParseLambdaARN(in); got != ok {
+			t.Errorf("ParseLambdaARN(%q) = %v, want %v", in, got, ok)
+		}
+	}
+}

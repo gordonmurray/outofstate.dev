@@ -132,6 +132,10 @@ type inventoryFile struct {
 			LBType        string            `json:"lb_type"` // application, network, gateway
 			Scheme        string            `json:"scheme"`
 			VPCID         string            `json:"vpc_id"`
+			Runtime       string            `json:"runtime"`
+			PackageType   string            `json:"package_type"`
+			Architecture  string            `json:"architecture"`
+			LastModified  string            `json:"last_modified"`
 			ARN           string            `json:"arn"`
 			Identifier    string            `json:"identifier"`
 			ResourceID    string            `json:"resource_id"`
@@ -180,9 +184,13 @@ func LoadFile(path string) (*Inventory, error) {
 					kind = LBKind(i.LBType)
 				case TypeS3Bucket:
 					kind = KindS3
+				case TypeLambdaFunction:
+					kind = KindLambda
 				}
 				inst := Instance{
 					Type: typ, Kind: kind, Scheme: i.Scheme, VPCID: i.VPCID,
+					Runtime: i.Runtime, PackageType: i.PackageType,
+					Architecture: i.Architecture, LastModified: i.LastModified,
 					Partition: f.Partition, AccountID: f.AccountID, Region: r.Region,
 					ARN: i.ARN, Identifier: i.Identifier, ResourceID: i.ResourceID,
 					Engine: i.Engine, EngineVersion: i.EngineVersion, Class: i.Class,
