@@ -269,6 +269,11 @@ Use --format json for full details (ARNs, resource and import IDs, tags).</pre>
           <h3>Lambda functions</h3>
           <p>Matched on the function ARN against <code>aws_lambda_function</code>. Functions have no lasting ID, so one recreated with the same name looks the same. Environment variables are never read into a report.</p>
         </div>
+        <div class="card">
+          <span class="tag">nat</span>
+          <h3>NAT gateways</h3>
+          <p>Matched on the gateway ID against <code>aws_nat_gateway</code>, and on account and region when the state records them. Older state without them is marked as a weaker match.</p>
+        </div>
       </div>
       <p class="muted" style="margin-top:22px">More resource types are on the way. When a resource’s tags show that CloudFormation, Elastic Beanstalk or Kubernetes manages it (or an S3 bucket’s or Lambda function’s name follows a tool’s convention), the report adds a warning so you check there before importing.</p>
     </section>

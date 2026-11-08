@@ -10,6 +10,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	elbv2 "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
 	"github.com/aws/aws-sdk-go-v2/service/rds"
@@ -58,6 +59,10 @@ type s3API interface {
 	GetBucketTagging(context.Context, *s3.GetBucketTaggingInput, ...func(*s3.Options)) (*s3.GetBucketTaggingOutput, error)
 }
 
+type ec2API interface {
+	ec2.DescribeNatGatewaysAPIClient
+}
+
 type lambdaAPI interface {
 	lambda.ListFunctionsAPIClient
 	ListTags(context.Context, *lambda.ListTagsInput, ...func(*lambda.Options)) (*lambda.ListTagsOutput, error)
@@ -80,6 +85,7 @@ type AWS struct {
 	newS3           func(aws.Config, string) s3API
 	newS3PathStyle  func(aws.Config, string) s3API
 	newLambda       func(aws.Config, string) lambdaAPI
+	newEC2          func(aws.Config, string) ec2API
 	regionTimeout   time.Duration
 	identityTimeout time.Duration
 	maxConcurrent   int
@@ -122,6 +128,9 @@ func newAWS(cfg aws.Config) *AWS {
 		},
 		newS3PathStyle: func(c aws.Config, region string) s3API {
 			return s3.NewFromConfig(c, func(o *s3.Options) { o.Region = region; o.UsePathStyle = true })
+		},
+		newEC2: func(c aws.Config, region string) ec2API {
+			return ec2.NewFromConfig(c, func(o *ec2.Options) { o.Region = region })
 		},
 		newLambda: func(c aws.Config, region string) lambdaAPI {
 			return lambda.NewFromConfig(c, func(o *lambda.Options) { o.Region = region })
@@ -186,6 +195,8 @@ func (a *AWS) Discover(ctx context.Context, regions []string, types ...string) (
 					rr = a.regionS3(ctx, partition, account, region)
 				case TypeLambdaFunction:
 					rr = a.regionLambda(ctx, partition, account, region)
+				case TypeNATGateway:
+					rr = a.regionNAT(ctx, partition, account, region)
 				default:
 					rr = a.region(ctx, partition, account, region)
 				}
@@ -452,6 +463,57 @@ func bucketTags(ctx context.Context, client s3API, bucket string) (*s3.GetBucket
 		}
 	}
 	return out, err
+}
+
+// regionNAT lists the NAT gateways in one region, zonal and regional. Tags
+// come with the response, so no second call is needed. Gateways that are
+// being deleted, are deleted or failed are left out (see NATGatewayGone).
+func (a *AWS) regionNAT(ctx context.Context, partition, account, region string) RegionResult {
+	ctx, cancel := context.WithTimeout(ctx, a.regionTimeout)
+	defer cancel()
+
+	p := ec2.NewDescribeNatGatewaysPaginator(a.newEC2(a.cfg, region), &ec2.DescribeNatGatewaysInput{})
+	var gateways []Instance
+	for p.HasMorePages() {
+		page, err := p.NextPage(ctx)
+		if err != nil {
+			return RegionResult{Region: region, Failed: true, Error: categorise(ctx, err, false)}
+		}
+		for _, gw := range page.NatGateways {
+			if NATGatewayGone(string(gw.State)) {
+				continue
+			}
+			id := aws.ToString(gw.NatGatewayId)
+			inst := Instance{
+				Type:             TypeNATGateway,
+				Kind:             KindNAT,
+				Partition:        partition,
+				AccountID:        account,
+				Region:           region,
+				ARN:              "arn:" + partition + ":ec2:" + region + ":" + account + ":natgateway/" + id,
+				Identifier:       id,
+				ResourceID:       id,
+				VPCID:            aws.ToString(gw.VpcId),
+				SubnetID:         aws.ToString(gw.SubnetId),
+				ConnectivityType: string(gw.ConnectivityType),
+				AvailabilityMode: string(gw.AvailabilityMode),
+				Status:           string(gw.State),
+				Created:          aws.ToTime(gw.CreateTime),
+			}
+			if inst.AvailabilityMode == "" {
+				inst.AvailabilityMode = "zonal" // the field arrived with regional gateways
+			}
+			if len(gw.Tags) > 0 {
+				inst.Tags = make(map[string]string, len(gw.Tags))
+				for _, t := range gw.Tags {
+					inst.Tags[aws.ToString(t.Key)] = aws.ToString(t.Value)
+				}
+			}
+			Classify(&inst)
+			gateways = append(gateways, inst)
+		}
+	}
+	return RegionResult{Region: region, Instances: gateways}
 }
 
 // lambdaTagWorkers bounds the ListTags calls in flight per region.

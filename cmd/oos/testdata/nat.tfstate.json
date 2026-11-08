@@ -1,0 +1,134 @@
+{
+  "version": 4,
+  "terraform_version": "1.17.1",
+  "serial": 1,
+  "lineage": "nat-lineage",
+  "outputs": {},
+  "resources": [
+    {
+      "mode": "managed",
+      "type": "aws_nat_gateway",
+      "name": "a",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "allocation_id": "eipalloc-1",
+            "association_id": "eipassoc-1",
+            "auto_provision_zones": null,
+            "auto_scaling_ips": null,
+            "availability_mode": "zonal",
+            "availability_zone_address": [],
+            "connectivity_type": "public",
+            "id": "nat-0000000000000000a",
+            "network_interface_id": "eni-1",
+            "private_ip": "10.0.0.5",
+            "public_ip": "203.0.113.5",
+            "region": "eu-west-1",
+            "regional_nat_gateway_address": [],
+            "route_table_id": "",
+            "secondary_allocation_ids": [],
+            "subnet_id": "subnet-1",
+            "tags": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "tags_all": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "timeouts": null,
+            "vpc_id": "vpc-1"
+          },
+          "sensitive_attributes": [],
+          "identity_schema_version": 0,
+          "identity": {
+            "account_id": "123456789012",
+            "region": "eu-west-1",
+            "id": "nat-0000000000000000a"
+          }
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_nat_gateway",
+      "name": "old",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "allocation_id": "eipalloc-1",
+            "association_id": "eipassoc-1",
+            "auto_provision_zones": null,
+            "auto_scaling_ips": null,
+            "availability_mode": "zonal",
+            "availability_zone_address": [],
+            "connectivity_type": "public",
+            "id": "nat-000000000000000b0",
+            "network_interface_id": "eni-1",
+            "private_ip": "10.0.0.5",
+            "public_ip": "203.0.113.5",
+            "region": "eu-west-1",
+            "regional_nat_gateway_address": [],
+            "route_table_id": "",
+            "secondary_allocation_ids": [],
+            "subnet_id": "subnet-1",
+            "tags": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "tags_all": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "timeouts": null,
+            "vpc_id": "vpc-1"
+          },
+          "sensitive_attributes": [],
+          "identity_schema_version": 0,
+          "identity": {
+            "account_id": "123456789012",
+            "region": "eu-west-1",
+            "id": "nat-000000000000000b0"
+          }
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "aws_nat_gateway",
+      "name": "legacy",
+      "provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "allocation_id": "eipalloc-1",
+            "association_id": "eipassoc-1",
+            "auto_provision_zones": null,
+            "auto_scaling_ips": null,
+            "availability_mode": "zonal",
+            "availability_zone_address": [],
+            "connectivity_type": "public",
+            "id": "nat-0000000000000000d",
+            "network_interface_id": "eni-1",
+            "private_ip": "10.0.0.5",
+            "public_ip": "203.0.113.5",
+            "regional_nat_gateway_address": [],
+            "route_table_id": "",
+            "secondary_allocation_ids": [],
+            "subnet_id": "subnet-1",
+            "tags": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "tags_all": {
+              "secret": "OOS-SECRET-MARKER"
+            },
+            "timeouts": null,
+            "vpc_id": "vpc-1"
+          },
+          "sensitive_attributes": []
+        }
+      ]
+    }
+  ]
+}

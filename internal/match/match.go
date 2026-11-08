@@ -267,7 +267,15 @@ func matchInstance(inst discover.Instance, sources []keptSource, stateComplete b
 // Most types take partition, account and region from the ARN and must agree
 // on all three. S3 bucket ARNs carry only the partition: the account and
 // region are compared when the state records them (see compare for region).
+//
+// NAT gateways have no ARN in state and no partition at all. A recorded
+// account or region must agree; one that is not recorded cannot rule the entry
+// out, and compare marks that match as weaker.
 func inScope(inst discover.Instance, id tfstate.Identity) bool {
+	if inst.TerraformType() == discover.TypeNATGateway {
+		return (id.AccountID == "" || id.AccountID == inst.AccountID) &&
+			(id.Region == "" || id.Region == inst.Region)
+	}
 	if id.Partition != inst.Partition {
 		return false
 	}
@@ -291,7 +299,21 @@ func inScope(inst discover.Instance, id tfstate.Identity) bool {
 // state entry (the database was recreated) and never falls back to ARN or
 // name. Fallback is allowed only when the state entry has no resource ID:
 // an exact ARN, then the identifier within the same scope, is a weaker match.
+//
+// NAT gateways: the gateway ID is the identity, and a recreated gateway gets a
+// new one. The ID alone does not prove the entry is about this account and
+// region, so the match is strong only when the state records both (inScope
+// has already checked they agree). State from older provider versions records
+// neither: it still counts as tracked, as a weaker match, because AWS
+// generates the IDs and reporting a tracked gateway as an import candidate
+// would be the worse mistake.
 func compare(inst discover.Instance, id tfstate.Identity) (key Key, weak, renamed, stale bool) {
+	if inst.TerraformType() == discover.TypeNATGateway {
+		if inst.ResourceID == "" || inst.ResourceID != id.ResourceID {
+			return "", false, false, false
+		}
+		return KeyResourceID, id.AccountID == "" || id.Region == "", false, false
+	}
 	if inst.TerraformType() == discover.TypeS3Bucket {
 		// Bucket names are unique within a partition, so the ARN identifies
 		// the bucket by name. If the state recorded a different region, the

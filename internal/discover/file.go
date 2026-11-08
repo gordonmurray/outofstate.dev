@@ -136,6 +136,9 @@ type inventoryFile struct {
 			PackageType   string            `json:"package_type"`
 			Architecture  string            `json:"architecture"`
 			LastModified  string            `json:"last_modified"`
+			SubnetID      string            `json:"subnet_id"`
+			Connectivity  string            `json:"connectivity_type"`
+			Availability  string            `json:"availability_mode"`
 			ARN           string            `json:"arn"`
 			Identifier    string            `json:"identifier"`
 			ResourceID    string            `json:"resource_id"`
@@ -186,11 +189,17 @@ func LoadFile(path string) (*Inventory, error) {
 					kind = KindS3
 				case TypeLambdaFunction:
 					kind = KindLambda
+				case TypeNATGateway:
+					kind = KindNAT
+					if NATGatewayGone(i.Status) {
+						continue
+					}
 				}
 				inst := Instance{
 					Type: typ, Kind: kind, Scheme: i.Scheme, VPCID: i.VPCID,
 					Runtime: i.Runtime, PackageType: i.PackageType,
 					Architecture: i.Architecture, LastModified: i.LastModified,
+					SubnetID: i.SubnetID, ConnectivityType: i.Connectivity, AvailabilityMode: i.Availability,
 					Partition: f.Partition, AccountID: f.AccountID, Region: r.Region,
 					ARN: i.ARN, Identifier: i.Identifier, ResourceID: i.ResourceID,
 					Engine: i.Engine, EngineVersion: i.EngineVersion, Class: i.Class,

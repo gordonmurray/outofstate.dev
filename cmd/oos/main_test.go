@@ -198,6 +198,7 @@ func TestReportsMatchSchema(t *testing.T) {
 		"load balancers":             {"--inventory-file", td("inventory_with_lb.json"), "--state-file", td("app.tfstate.json"), "--state-file", td("edge.tfstate.json")},
 		"s3 buckets":                 {"--inventory-file", td("inventory_with_s3.json"), "--state-file", td("storage.tfstate.json")},
 		"lambda functions":           {"--inventory-file", td("inventory_with_lambda.json"), "--state-file", td("lambda.tfstate.json")},
+		"nat gateways":               {"--inventory-file", td("inventory_with_nat.json"), "--state-file", td("nat.tfstate.json")},
 	}
 	if err := os.WriteFile(td("app-copy.tfstate.json"), mustRead(t, td("app.tfstate.json")), 0o600); err != nil {
 		t.Fatal(err)
@@ -699,5 +700,115 @@ func TestLambdaFunctions(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Errorf("text missing %q:\n%s", want, text)
 		}
+	}
+}
+
+func TestNATGateways(t *testing.T) {
+	id := func(s string) string { return "nat-" + strings.Repeat("0", 17-len(s)) + s }
+	args := []string{"--inventory-file", td("inventory_with_nat.json"), "--type", "nat", "--state-file", td("nat.tfstate.json")}
+	code, out, _ := oos(t, append(args, "--format", "json")...)
+	if code != scan.ExitNoMatch {
+		t.Fatalf("exit = %d", code)
+	}
+	var rep struct {
+		Findings []struct {
+			Identifier string            `json:"identifier"`
+			Kind       string            `json:"kind"`
+			Status     string            `json:"status"`
+			ImportID   string            `json:"import_id"`
+			Details    map[string]string `json:"details"`
+			Matches    []struct {
+				Weak bool `json:"weak"`
+			} `json:"matches"`
+			Warnings []struct {
+				Kind string `json:"kind"`
+				Tool string `json:"tool"`
+			} `json:"warnings"`
+		} `json:"findings"`
+	}
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Findings) != 5 {
+		t.Fatalf("findings = %d, want 5 (deleted, failed and deleting left out)", len(rep.Findings))
+	}
+	by := map[string]int{}
+	for i, f := range rep.Findings {
+		by[f.Identifier] = i
+	}
+	for _, s := range []string{"a", "b1", "c", "d", "e"} {
+		if _, ok := by[id(s)]; !ok {
+			t.Fatalf("no finding for %s", id(s))
+		}
+	}
+	a := rep.Findings[by[id("a")]]
+	if a.Status != "tracked" || a.Kind != "nat" || len(a.Matches) != 1 || a.Matches[0].Weak {
+		t.Errorf("tracked with account and region: %+v", a)
+	}
+	if a.Details["name"] != "prod-a" || a.Details["vpc_id"] != "vpc-1" || a.Details["subnet_id"] != "subnet-1" ||
+		a.Details["availability_mode"] != "zonal" || a.Details["connectivity_type"] != "public" {
+		t.Errorf("details: %+v", a.Details)
+	}
+	if f := rep.Findings[by[id("b1")]]; f.Status != "no_match" || f.ImportID != id("b1") {
+		t.Errorf("recreated gateway must not match the old ID: %+v", f)
+	}
+	c := rep.Findings[by[id("c")]]
+	if _, hasSubnet := c.Details["subnet_id"]; c.Status != "no_match" || hasSubnet || c.Details["availability_mode"] != "regional" {
+		t.Errorf("regional gateway: %+v", c)
+	}
+	if d := rep.Findings[by[id("d")]]; d.Status != "tracked" || len(d.Matches) != 1 || !d.Matches[0].Weak {
+		t.Errorf("state with no account or region must be a weaker match: %+v", d)
+	}
+	if e := rep.Findings[by[id("e")]]; e.Status != "no_match" || len(e.Warnings) != 1 || e.Warnings[0].Tool != "cloudformation" {
+		t.Errorf("cloudformation gateway: %+v", e)
+	}
+
+	_, text, _ := oos(t, args...)
+	for _, want := range []string{
+		"eu-west-1       nat    public regional",
+		"eu-west-1       nat    private zonal",
+		"name recreated",
+		"aws_nat_gateway.a (resource_id)",
+		"aws_nat_gateway.legacy (resource_id, weaker match)",
+		"its tags suggest it is managed by CloudFormation",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("text missing %q:\n%s", want, text)
+		}
+	}
+}
+
+// A state entry with the gateway's ID but contradictory scope must not count
+// as tracked, or as a clean "no match" either.
+func TestNATContradictoryScopeIsUnverified(t *testing.T) {
+	id := "nat-" + strings.Repeat("0", 16) + "a"
+	state := `{"version":4,"serial":1,"lineage":"l","resources":[{"mode":"managed","type":"aws_nat_gateway","name":"a","instances":[
+{"schema_version":0,"attributes":{"id":"` + id + `","region":"eu-west-1"},"identity_schema_version":0,
+"identity":{"account_id":"123456789012","region":"us-east-1","id":"` + id + `"}}]}]}`
+	path := filepath.Join(t.TempDir(), "conflict.tfstate.json")
+	if err := os.WriteFile(path, []byte(state), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, out, _ := oos(t, "--inventory-file", td("inventory_with_nat.json"), "--type", "nat", "--state-file", path, "--format", "json")
+	var rep struct {
+		Findings []struct {
+			Identifier string `json:"identifier"`
+			Status     string `json:"status"`
+		} `json:"findings"`
+	}
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, f := range rep.Findings {
+		if f.Identifier == id {
+			found = true
+			if f.Status != "unable_to_verify" {
+				t.Errorf("status = %s, want unable_to_verify", f.Status)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no finding for %s", id)
 	}
 }

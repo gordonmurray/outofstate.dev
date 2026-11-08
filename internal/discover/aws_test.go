@@ -43,6 +43,7 @@ type fakeAWS struct {
 	lambdaTags       map[string]map[string]string // ARN -> tags
 	lambdaTagFail    map[string]bool              // ARN -> ListTags fails
 	lambdaQueries    []string                     // query string of each ListFunctions call
+	natPages         map[string][]string          // region -> pages of NAT gateway <item> XML
 	tagBatches       []int                        // ARNs per DescribeTags call
 	inflight         int
 	maxSeen          int
@@ -144,6 +145,27 @@ func (f *fakeAWS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		_, _ = fmt.Fprintf(w, `<DescribeTagsResponse xmlns="http://elasticloadbalancing.amazonaws.com/doc/2015-12-01/"><DescribeTagsResult>
 <TagDescriptions>%s</TagDescriptions></DescribeTagsResult><ResponseMetadata><RequestId>1</RequestId></ResponseMetadata></DescribeTagsResponse>`, descs.String())
+	case "DescribeNatGateways":
+		page := 0
+		if m := r.Form.Get("NextToken"); m != "" {
+			_, _ = fmt.Sscanf(m, "page-%d", &page)
+		}
+		if fp, ok := f.failPage["nat/"+region]; ok && fp == page {
+			w.Header().Set("Content-Type", "text/xml")
+			w.WriteHeader(403)
+			_, _ = fmt.Fprintf(w, `<Response><Errors><Error><Code>%s</Code><Message>OOS-SECRET-MARKER</Message></Error></Errors><RequestID>1</RequestID></Response>`, f.failCode)
+			return
+		}
+		pages := f.natPages[region]
+		body := ""
+		if page < len(pages) {
+			body = pages[page]
+		}
+		token := ""
+		if page+1 < len(pages) {
+			token = fmt.Sprintf("<nextToken>page-%d</nextToken>", page+1)
+		}
+		_, _ = fmt.Fprintf(w, `<DescribeNatGatewaysResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/"><requestId>1</requestId><natGatewaySet>%s</natGatewaySet>%s</DescribeNatGatewaysResponse>`, body, token)
 	case "ListTagsForResource":
 		if f.failTags {
 			writeError(w, "AccessDenied")
@@ -1112,5 +1134,101 @@ func TestLambdaTimeoutStopsTagging(t *testing.T) {
 	}
 	if tagCalls := f.countPrefix("ListTags/"); unavailable == 0 || tagCalls >= 20 {
 		t.Errorf("after the deadline no new calls should start: %d tag calls, %d marked unavailable", tagCalls, unavailable)
+	}
+}
+
+func natID(s string) string { return "nat-" + strings.Repeat("0", 17-len(s)) + s }
+
+// natXML is one DescribeNatGateways entry. extra holds optional elements.
+func natXML(s, state, extra string) string {
+	return fmt.Sprintf(`<item><natGatewayId>%s</natGatewayId><vpcId>vpc-1</vpcId><state>%s</state><connectivityType>public</connectivityType>
+<createTime>2025-04-01T09:00:00.000Z</createTime>%s</item>`, natID(s), state, extra)
+}
+
+const (
+	natSubnet = `<subnetId>subnet-1</subnetId>`
+	natZonal  = natSubnet + `<availabilityMode>zonal</availabilityMode>`
+)
+
+func natTag(k, v string) string {
+	return fmt.Sprintf(`<tagSet><item><key>%s</key><value>%s</value></item></tagSet>`, k, v)
+}
+
+func TestNATGatewayDiscovery(t *testing.T) {
+	f := &fakeAWS{natPages: map[string][]string{"eu-west-1": {
+		natXML("a", "available", natZonal+natTag("Name", "prod-a")) +
+			natXML("b", "pending", `<availabilityMode>regional</availabilityMode>`) +
+			natXML("c", "available", natSubnet), // no availabilityMode: older response
+		natXML("d", "deleted", natZonal) + natXML("e", "deleting", natZonal) + natXML("f", "failed", natZonal) +
+			natXML("g", "some-future-state", natZonal) +
+			natXML("h", "available", natZonal+natTag("aws:cloudformation:stack-name", "vpc")),
+	}}}
+	inv, err := newTestAWS(t, f).Discover(context.Background(), []string{"eu-west-1"}, TypeNATGateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !inv.Complete() || inv.Regions[0].Type != TypeNATGateway {
+		t.Fatalf("%+v", inv.Regions)
+	}
+	by := map[string]Instance{}
+	for _, g := range inv.Instances() {
+		by[g.Identifier] = g
+	}
+	if len(by) != 5 {
+		t.Fatalf("gateways = %d, want 5 (two pages, deleted, deleting and failed left out): %v", len(by), by)
+	}
+	a := by[natID("a")]
+	if a.Type != TypeNATGateway || a.Kind != KindNAT || a.ResourceID != natID("a") || a.AccountID != account || a.Region != "eu-west-1" ||
+		a.ARN != "arn:aws:ec2:eu-west-1:"+account+":natgateway/"+natID("a") || a.VPCID != "vpc-1" || a.SubnetID != "subnet-1" ||
+		a.ConnectivityType != "public" || a.AvailabilityMode != "zonal" || a.Status != "available" ||
+		a.Created.Year() != 2025 || a.Tags["Name"] != "prod-a" || a.TagsUnavailable {
+		t.Errorf("zonal gateway: %+v", a)
+	}
+	if b := by[natID("b")]; b.AvailabilityMode != "regional" || b.SubnetID != "" || b.Status != "pending" {
+		t.Errorf("regional gateway: %+v", b)
+	}
+	if c := by[natID("c")]; c.AvailabilityMode != "zonal" {
+		t.Errorf("no availability mode means zonal: %+v", c)
+	}
+	if g := by[natID("g")]; g.Status != "some-future-state" {
+		t.Errorf("an unknown state must not hide a gateway: %+v", g)
+	}
+	if h := by[natID("h")]; h.ManagedBy != ManagedByCloudFormation {
+		t.Errorf("cloudformation tags: %+v", h)
+	}
+	if f.calls["DescribeNatGateways/eu-west-1"] != 2 {
+		t.Errorf("calls: %v", f.calls)
+	}
+}
+
+func TestNATFailureOnlyFailsThatType(t *testing.T) {
+	f := &fakeAWS{pages: map[string][]string{"eu-west-1": {db("orders-db", "db-ORDERS", `<TagList></TagList>`)}},
+		failPage: map[string]int{"nat/eu-west-1": 0}, failCode: "UnauthorizedOperation"}
+	inv, err := newTestAWS(t, f).Discover(context.Background(), []string{"eu-west-1"}, TypeDBInstance, TypeNATGateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inv.Regions[0].Failed || !inv.Regions[1].Failed || inv.Regions[1].Error != ErrAccessDenied {
+		t.Errorf("%+v", inv.Regions)
+	}
+}
+
+func TestNATLaterPageFailure(t *testing.T) {
+	f := &fakeAWS{natPages: map[string][]string{"eu-west-1": {natXML("a", "available", natZonal), natXML("b", "available", natZonal)}},
+		failPage: map[string]int{"nat/eu-west-1": 1}, failCode: "RequestLimitExceeded"}
+	inv, err := newTestAWS(t, f).Discover(context.Background(), []string{"eu-west-1"}, TypeNATGateway)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := inv.Regions[0]; !r.Failed || r.Error != ErrThrottled || len(r.Instances) != 0 {
+		t.Errorf("a later-page failure must fail the region with no partial list: %+v", r)
+	}
+}
+
+func TestNATIgnoresKubernetesClusterTags(t *testing.T) {
+	g := Instance{Type: TypeNATGateway, Tags: map[string]string{"kubernetes.io/cluster/prod": "shared"}}
+	Classify(&g)
+	if g.ManagedBy != "" {
+		t.Errorf("ManagedBy = %q, want none: Kubernetes does not manage NAT gateways", g.ManagedBy)
 	}
 }
