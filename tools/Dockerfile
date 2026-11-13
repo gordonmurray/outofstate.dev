@@ -7,7 +7,7 @@ FROM goreleaser/goreleaser:v2.20.0 AS goreleaser
 
 # Go 1.27.3 is the only Go toolchain used for building, testing and linting.
 # The tool binaries are copied in so that they all run against this Go.
-FROM golang:1.27.3-trixie AS tools
+FROM golang:1.27.4-trixie AS tools
 COPY --from=golangci-lint /usr/bin/golangci-lint /usr/local/bin/golangci-lint
 COPY --from=goreleaser /usr/bin/goreleaser /usr/local/bin/goreleaser
 ENV GOTOOLCHAIN=local \
