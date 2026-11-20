@@ -21,7 +21,7 @@ RUN git config --system --add safe.directory /src
 WORKDIR /src
 
 # Terraform for the end-to-end test (Dependabot keeps it current).
-FROM hashicorp/terraform:1.17.1 AS terraform
+FROM hashicorp/terraform:1.17.2 AS terraform
 
 # Used only by "make e2e": Terraform, the AWS CLI and jq.
 FROM terraform AS e2e
