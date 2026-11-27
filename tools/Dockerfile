@@ -3,7 +3,7 @@
 # The Makefile builds the "tools" stage as the local image oos-tools:local.
 
 FROM golangci/golangci-lint:v2.15.0 AS golangci-lint
-FROM goreleaser/goreleaser:v2.20.0 AS goreleaser
+FROM goreleaser/goreleaser:v2.20.3 AS goreleaser
 
 # Go 1.27.3 is the only Go toolchain used for building, testing and linting.
 # The tool binaries are copied in so that they all run against this Go.
